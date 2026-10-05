@@ -19,7 +19,8 @@ export const MAX_FILE_BYTES = 100 * 1024 * 1024;
 export interface DropResult {
   attachments: { id: number; fileName: string }[];
   /** Parts added from spreadsheets, by file. */
-  linesAdded: { fileName: string; sheet: string | null; lineIds: number[] }[];
+  /** `alreadyOnQuote`: parts in the file that the quote already had, not added again. */
+  linesAdded: { fileName: string; sheet: string | null; lineIds: number[]; alreadyOnQuote: number }[];
   /** Spreadsheets that looked like a parts list but gave nothing, and why. */
   notRead: { fileName: string; problem: string }[];
   /** What the RFQ email filled in on the quote. */
@@ -62,15 +63,31 @@ async function insertAttachment(db: Queryable, actor: Account, quoteId: number, 
   return rows[0]?.id as number;
 }
 
-async function addLines(db: Queryable, quoteId: number, lines: ReturnType<typeof proposeLines>['lines']): Promise<number[]> {
+/**
+ * The same part twice is one part: an RFQ often carries its parts list both attached to the email and
+ * as a separate file. A part is matched by part number and revision, or by description when it has no
+ * part number; one already on the quote is skipped and counted, never merged into the one there.
+ */
+export const partKey = (l: { partNumber: string; revision: string; description: string }): string => {
+  const n = (v: string) => v.trim().toLowerCase().replace(/\s+/g, ' ');
+  return n(l.partNumber) ? `pn:${n(l.partNumber)}|${n(l.revision)}` : `desc:${n(l.description)}`;
+};
+
+async function addLines(db: Queryable, quoteId: number, lines: ReturnType<typeof proposeLines>['lines']): Promise<{ ids: number[]; skipped: number }> {
+  const existing = await db.query<{ part_number: string; revision: string; description: string }>('SELECT part_number, revision, description FROM quote.line WHERE quote_id = $1 AND removed_at IS NULL', [quoteId]);
+  const seen = new Set(existing.map((r) => partKey({ partNumber: r.part_number, revision: r.revision, description: r.description })));
   const start = (await db.query<{ n: number }>('SELECT coalesce(max(position), 0)::int AS n FROM quote.line WHERE quote_id = $1 AND removed_at IS NULL', [quoteId]))[0]?.n ?? 0;
   const ids: number[] = [];
-  for (const [i, l] of lines.slice(0, 500).entries()) {
+  let skipped = 0;
+  for (const l of lines.slice(0, 500)) {
+    const key = partKey(l);
+    if (seen.has(key)) { skipped++; continue; }
+    seen.add(key);
     const rows = await db.query<{ id: number }>('INSERT INTO quote.line (quote_id, position, part_number, revision, description, qty_per, notes) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id',
-      [quoteId, start + i + 1, l.partNumber.slice(0, 100), l.revision.slice(0, 20), l.description.slice(0, 500), l.qtyPer, l.notes.slice(0, 2000)]);
+      [quoteId, start + ids.length + 1, l.partNumber.slice(0, 100), l.revision.slice(0, 20), l.description.slice(0, 500), l.qtyPer, l.notes.slice(0, 2000)]);
     ids.push(rows[0]?.id as number);
   }
-  return ids;
+  return { ids, skipped };
 }
 
 /** Adds one dropped file to a quote, reading it if it is an RFQ email or a parts spreadsheet. */
@@ -121,7 +138,8 @@ export async function dropFile(db: Database, actor: Account, quoteId: number, fi
         result.notRead.push({ fileName: p.fileName, problem: 'Attached; parts are only added from a file while the quote is being put together.' });
         continue;
       }
-      result.linesAdded.push({ fileName: p.fileName, sheet: p.sheet, lineIds: await addLines(tx, quoteId, p.lines) });
+      const added = await addLines(tx, quoteId, p.lines);
+      result.linesAdded.push({ fileName: p.fileName, sheet: p.sheet, lineIds: added.ids, alreadyOnQuote: added.skipped });
     }
     if (result.linesAdded.length && q.status === 'estimating') {
       await tx.query("INSERT INTO quote.message (quote_id, author_id, kind, body) VALUES ($1, $2, 'event', $3)", [quoteId, actor.id, 'Parts were added from a file. Choose who prices them.']);

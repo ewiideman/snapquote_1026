@@ -19,12 +19,14 @@ const COLUMNS: { key: string; title: string; stages: Stage[] }[] = [
 export async function startQuote(files: File[], toast: (t: string) => void): Promise<number> {
   const { id } = await post<{ id: number }>('/quotes');
   let lines = 0;
+  let repeats = 0;
   let from: string | null = null;
   const unread: string[] = [];
   for (const f of files) {
     try {
       const r = await upload<DropResult>(`/quotes/${id}/files`, f);
       lines += r.linesAdded.reduce((s, l) => s + l.lineIds.length, 0);
+      repeats += r.linesAdded.reduce((s, l) => s + l.alreadyOnQuote, 0);
       if (r.fromEmail) from = r.fromEmail.from;
       unread.push(...r.notRead.map((n) => n.fileName));
     } catch (err) {
@@ -37,7 +39,7 @@ export async function startQuote(files: File[], toast: (t: string) => void): Pro
     from ? `from ${from}` : '',
     lines ? `and ${lines} part${lines === 1 ? '' : 's'} from the parts list` : '',
   ].filter(Boolean).join(' ');
-  toast(`${said}.${unread.length ? ` Attached but not read: ${unread.join(', ')}.` : ''}`);
+  toast(`${said}.${repeats ? ` ${repeats} part${repeats === 1 ? ' was' : 's were'} in more than one file and added once.` : ''}${unread.length ? ` Attached but not read: ${unread.join(', ')}.` : ''}`);
   return id;
 }
 

@@ -400,18 +400,21 @@ function Files({ d, onChange }: { d: QuoteDetail; onChange: (n?: QuoteDetail) =>
   const drop = async (files: File[]) => {
     setError(null);
     const said: string[] = [];
+    const repeats: string[] = [];
     for (const f of files) {
       setBusy(`Reading ${f.name}…`);
       try {
         const r = await upload<DropResult>(`/quotes/${d.quote.id}/files`, f);
         const n = r.linesAdded.reduce((s, l) => s + l.lineIds.length, 0);
         if (n) said.push(`${n} part${n === 1 ? '' : 's'} from ${f.name}`);
+        const dup = r.linesAdded.reduce((s, l) => s + l.alreadyOnQuote, 0);
+        if (dup) repeats.push(`${dup} part${dup === 1 ? '' : 's'} in ${f.name} ${dup === 1 ? 'was' : 'were'} already on the quote and not added again.`);
         if (r.fromEmail) said.push(`the email from ${r.fromEmail.from}`);
         if (r.attachments.length > 1) said.push(`${r.attachments.length - 1} attachment${r.attachments.length === 2 ? '' : 's'}`);
       } catch (err) { setError(err); }
     }
     setBusy(null);
-    if (said.length) app.toast(`Added ${said.join(', ')}.`);
+    if (said.length || repeats.length) app.toast([said.length ? `Added ${said.join(', ')}.` : '', ...repeats].filter(Boolean).join(' '));
     onChange();
   };
   return (

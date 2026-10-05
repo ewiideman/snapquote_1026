@@ -99,11 +99,20 @@ test('a quote from RFQ email to won', async () => {
   assert.equal(dropped.status, 201, JSON.stringify(dropped.body));
   assert.equal(dropped.body.fromEmail.subject, 'RFQ: Controller enclosure');
   assert.equal(dropped.body.linesAdded[0].lineIds.length, 2);
+  // The same parts list again, as a separate file: nothing is added twice, and the reply says so.
+  const again = await jon('POST', `/quotes/${qid}/files?name=bom-copy.csv`, undefined, Buffer.from('Part Number,Rev,Description,Qty Per\n100-200,B,Mounting bracket,2\nPCB-77,,Controller board,1\nNEW-1,,Gasket,4\n'));
+  assert.equal(again.status, 201);
+  assert.equal(again.body.linesAdded[0].lineIds.length, 1, 'only the new part');
+  assert.equal(again.body.linesAdded[0].alreadyOnQuote, 2);
+  const withNew = (await jon('GET', `/quotes/${qid}`)).body.lines;
+  assert.deepEqual(withNew.map((l: any) => l.partNumber), ['100-200', 'PCB-77', 'NEW-1']);
+  // Remove the extra part again so the rest of the test is unchanged.
+  await jon('PUT', `/quotes/${qid}/lines`, { lines: withNew.filter((l: any) => l.partNumber !== 'NEW-1').map((l: any) => ({ id: l.id, partNumber: l.partNumber, revision: l.revision, description: l.description, qtyPer: l.qtyPer, notes: l.notes })) });
   let q = (await jon('GET', `/quotes/${qid}`)).body;
   assert.equal(q.quote.title, 'Controller enclosure');
   assert.equal(q.quote.contactEmail, 'jane@acme-medical.com');
   assert.equal(q.quote.rfqReceivedOn, '2026-10-05');
-  assert.deepEqual(q.attachments.map((a: any) => a.fileName).sort(), ['RFQ.eml', 'bom.csv']);
+  assert.deepEqual(q.attachments.map((a: any) => a.fileName).sort(), ['RFQ.eml', 'bom-copy.csv', 'bom.csv']);
   assert.equal(q.lines[0].qtyPer, 2);
 
   // It cannot go to the departments until the customer, quantities and departments are set.
