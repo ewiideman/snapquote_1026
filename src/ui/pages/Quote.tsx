@@ -5,7 +5,7 @@ import { get, patch, post, put, upload, del } from '../lib/api.ts';
 import { useAsync } from '../lib/useAsync.ts';
 import type { DepartmentKey, DropResult, Line, QuoteDetail } from '../lib/types.ts';
 import { STAGE_NAMES } from '../lib/types.ts';
-import { canEstimate, canSell, DeptChip, Dialog, DropZone, Due, ErrorBanner, useApp } from '../components/ui.tsx';
+import { canEstimate, canSell, DateField, DeptChip, Dialog, DropZone, Due, ErrorBanner, plausibleDate, useApp } from '../components/ui.tsx';
 import { ago, fileSize, qty, shortDate, usd } from '../lib/format.ts';
 import { PricePanel } from './PricePanel.tsx';
 
@@ -156,9 +156,9 @@ function NextStep({ d, lines, reload, setError, dirty }: { d: QuoteDetail; lines
         <p><b>{problems.length ? 'To send it to the departments,' : 'Ready for the departments.'}</b>
           <span className="muted">{problems.length ? `${problems.join(', ')}.` : `${[...new Set(lines.map((l) => l.department))].map((k) => app.deptName(k)).join(', ')} will get it in their queue.`}</span></p>
         <label className="field" style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>Prices needed by
-          <input type="date" value={neededBy} onChange={(e) => setNeededBy(e.target.value)} />
+          <input type="date" value={neededBy} min="2000-01-01" max="2100-12-31" onChange={(e) => setNeededBy(e.target.value)} />
         </label>
-        <button className="btn primary" disabled={problems.length > 0 || dirty} onClick={() => run(() => post(`/quotes/${d.quote.id}/send-to-estimating`, { neededBy: neededBy || null }))}>Send to the departments</button>
+        <button className="btn primary" disabled={problems.length > 0 || dirty || (neededBy !== '' && !plausibleDate(neededBy))} onClick={() => run(() => post(`/quotes/${d.quote.id}/send-to-estimating`, { neededBy: neededBy || null }))}>Send to the departments</button>
       </div>
     );
   }
@@ -561,11 +561,11 @@ export function QuotePage({ id }: { id: number }) {
                     : <span style={{ color: 'var(--ink)', fontSize: 14 }}>{q.contactEmail ? <a href={`mailto:${q.contactEmail}`}>{q.contactEmail}</a> : '—'}</span>}
                 </label>
                 <label className="field">RFQ received
-                  {editableHeader ? <input type="date" defaultValue={q.rfqReceivedOn ?? ''} key={`r${q.updatedAt}`} onChange={(e) => save({ rfqReceivedOn: e.target.value || null })} />
+                  {editableHeader ? <DateField value={q.rfqReceivedOn} onSave={(v) => save({ rfqReceivedOn: v })} />
                     : <span style={{ color: 'var(--ink)', fontSize: 14 }}>{shortDate(q.rfqReceivedOn) || '—'}</span>}
                 </label>
                 <label className="field"><span>Customer wants it by {!closed && q.status !== 'sent' && <Due date={q.customerDueOn} />}</span>
-                  {editableHeader ? <input type="date" defaultValue={q.customerDueOn ?? ''} key={`d${q.updatedAt}`} onChange={(e) => save({ customerDueOn: e.target.value || null })} />
+                  {editableHeader ? <DateField value={q.customerDueOn} onSave={(v) => save({ customerDueOn: v })} />
                     : <span style={{ color: 'var(--ink)', fontSize: 14 }}>{shortDate(q.customerDueOn) || '—'}</span>}
                 </label>
                 <label className="field">Business development

@@ -47,6 +47,14 @@ test('from RFQ email to won', async ({ browser }) => {
   await jon.getByPlaceholder('Type a name — new ones are added').fill('Acme Medical');
   await jon.getByPlaceholder('Type a name — new ones are added').blur();
   await expect(jon.getByText('✓ All changes saved')).toBeVisible();
+  // A date typed one key at a time: the half-typed years (0002, 0020, 0202) are never saved.
+  const due = jon.locator('label', { hasText: 'Customer wants it by' }).locator('input[type=date]');
+  await due.click();
+  await jon.keyboard.type('10202026');
+  await due.blur();
+  await expect(due).toHaveValue('2026-10-20');
+  const id = jon.url().split('/').pop();
+  await expect.poll(async () => (await (await jon.request.get(`/api/quotes/${id}`)).json()).quote.customerDueOn).toBe('2026-10-20');
   await jon.getByPlaceholder('e.g. 100, 500, 1k').fill('100, 500');
   await jon.keyboard.press('Enter');
   await expect(jon.locator('.qty-chips .q')).toHaveCount(2);

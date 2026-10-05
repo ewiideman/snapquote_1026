@@ -119,6 +119,9 @@ test('a quote from RFQ email to won', async () => {
   let r = await jon('POST', `/quotes/${qid}/send-to-estimating`, {});
   assert.equal(r.status, 400);
   assert.match(r.body.error, /Name the customer/);
+  const slip = await jon('PATCH', `/quotes/${qid}`, { customerDueOn: '0020-01-01' });
+  assert.equal(slip.status, 400, 'a half-typed year is refused');
+  assert.match(slip.body.error, /2000 to 2100/);
   await jon('PATCH', `/quotes/${qid}`, { customerName: 'Acme Medical', quantities: [500, 100], customerDueOn: '2026-10-20' });
   const lines = q.lines.map((l: any) => ({ id: l.id, partNumber: l.partNumber, revision: l.revision, description: l.description, qtyPer: l.qtyPer, notes: l.notes, department: l.partNumber === 'PCB-77' ? 'procurement' : 'metals' }));
   assert.equal((await jon('PUT', `/quotes/${qid}/lines`, { lines })).status, 200);

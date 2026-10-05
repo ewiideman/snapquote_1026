@@ -309,7 +309,8 @@ export async function createQuote(db: Database, actor: Account): Promise<number>
   });
 }
 
-const isDate = (v: unknown): v is string => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) && !Number.isNaN(Date.parse(`${v}T00:00:00Z`));
+/** A full date with a year from 2000 to 2100: a half-typed year (0020) is a typing slip, not a date. */
+const isDate = (v: unknown): v is string => typeof v === 'string' && /^(20\d\d|2100)-\d{2}-\d{2}$/.test(v) && !Number.isNaN(Date.parse(`${v}T00:00:00Z`));
 const optText = (v: unknown, max = 500): string | null => {
   if (v === null || v === undefined) return null;
   if (typeof v !== 'string') throw new HttpError(400, 'Expected text.');
@@ -370,7 +371,7 @@ export async function updateHeader(db: Database, actor: Account, id: number, pat
     for (const [key, col] of [['rfqReceivedOn', 'rfq_received_on'], ['customerDueOn', 'customer_due_on']] as const) {
       const v = patch[key];
       if (v === undefined) continue;
-      if (v !== null && v !== '' && !isDate(v)) throw new HttpError(400, 'Dates are YYYY-MM-DD.');
+      if (v !== null && v !== '' && !isDate(v)) throw new HttpError(400, 'Check the date: a year from 2000 to 2100.');
       set(col, v || null);
     }
     if (patch.ownerId !== undefined) {

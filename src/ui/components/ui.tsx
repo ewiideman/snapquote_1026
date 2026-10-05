@@ -168,3 +168,37 @@ export function NumberInput({ value, onChange, className, placeholder, step, ...
     />
   );
 }
+
+/** A full date the plant could mean: YYYY-MM-DD with a year from 2000 to 2100. */
+export const plausibleDate = (v: string): boolean => /^(20\d\d|2100)-\d\d-\d\d$/.test(v) && !Number.isNaN(Date.parse(`${v}T12:00:00Z`));
+
+/**
+ * A date that saves itself. While someone types, the browser reports every half-typed year (0002,
+ * 0020, 0202) as a date; those are never saved. The date is saved once it is a plausible full date, or
+ * when the field is left (empty clears it). The field keeps what is typed and is not redrawn under it.
+ */
+export function DateField({ value, onSave, ...rest }: { value: string | null; onSave: (v: string | null) => void; 'aria-label'?: string }) {
+  const [text, setText] = useState(value ?? '');
+  const [problem, setProblem] = useState<string | null>(null);
+  const focused = useRef(false);
+  const saved = useRef(value ?? '');
+  useEffect(() => {
+    if (!focused.current) { setText(value ?? ''); saved.current = value ?? ''; }
+  }, [value]);
+  const commit = (v: string, leaving: boolean) => {
+    if (v === saved.current) { setProblem(null); return; }
+    if (v === '') { if (leaving) { saved.current = ''; setProblem(null); onSave(null); } return; }
+    if (plausibleDate(v)) { saved.current = v; setProblem(null); onSave(v); return; }
+    if (leaving) setProblem('Check the year: a date from 2000 to 2100.');
+  };
+  return (
+    <span style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+      <input {...rest} type="date" value={text} min="2000-01-01" max="2100-12-31"
+        onFocus={() => { focused.current = true; }}
+        onChange={(e) => { setText(e.target.value); commit(e.target.value, false); }}
+        onBlur={(e) => { focused.current = false; commit(e.target.value, true); }}
+        onKeyDown={(e) => { if (e.key === 'Enter') commit((e.target as HTMLInputElement).value, true); }} />
+      {problem && <span className="hint" style={{ color: 'var(--late)' }}>{problem}</span>}
+    </span>
+  );
+}
