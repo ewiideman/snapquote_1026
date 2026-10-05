@@ -28,11 +28,20 @@ test('from RFQ email to won', async ({ browser }) => {
   await expect(jon.getByText('Email address saved.')).toBeVisible();
   await jon.goto('/');
   await expect(jon.getByText('Good', { exact: false }).first()).toBeVisible();
+  // Files are gathered first -- dropped one at a time here -- and the quote starts when asked.
   await jon.locator('.drop input[type=file]').setInputFiles({ name: 'RFQ.eml', mimeType: 'message/rfc822', buffer: Buffer.from(eml) });
+  await expect(jon.getByText('1 file for the new quote')).toBeVisible();
+  await jon.locator('.drop input[type=file]').setInputFiles({ name: 'drawing.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4 test') });
+  await jon.locator('.drop input[type=file]').setInputFiles({ name: 'oops.txt', mimeType: 'text/plain', buffer: Buffer.from('not this one') });
+  await jon.getByRole('button', { name: 'Remove oops.txt' }).click();
+  await expect(jon.getByText('2 files for the new quote')).toBeVisible();
+  await jon.getByRole('button', { name: 'Start the quote', exact: true }).click();
   await expect(jon).toHaveURL(/#\/quotes\/\d+$/);
   const url = jon.url();
   await expect(jon.getByText('From the email “RFQ: Controller enclosure”')).toBeVisible();
   await expect(jon.locator('table.grid tbody tr')).toHaveCount(2);
+  await expect(jon.locator('.files')).toContainText('drawing.pdf');
+  await expect(jon.locator('.files')).not.toContainText('oops.txt');
   await expect(jon.getByText(/To send it to the departments/)).toBeVisible();
 
   await jon.getByPlaceholder('Type a name — new ones are added').fill('Acme Medical');

@@ -5,7 +5,7 @@ import { get, post, upload, message } from '../lib/api.ts';
 import { useAsync, stored } from '../lib/useAsync.ts';
 import type { BoardCard, DropResult, Stage } from '../lib/types.ts';
 import { canSell, DeptChip, DropZone, Due, ErrorBanner, useApp } from '../components/ui.tsx';
-import { usdShort, ago, daysUntil } from '../lib/format.ts';
+import { usdShort, ago, daysUntil, fileSize } from '../lib/format.ts';
 
 const COLUMNS: { key: string; title: string; stages: Stage[] }[] = [
   { key: 'draft', title: 'Drafting', stages: ['draft'] },
@@ -75,6 +75,10 @@ export function Board() {
   const [focus, setFocus] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
+  // Files dropped for the next quote, held until the person starts it: an RFQ is often several files
+  // picked or dropped one at a time.
+  const [staged, setStaged] = useState<File[]>([]);
+  const stage = (files: File[]) => setStaged((now) => [...now, ...files.filter((f) => !now.some((x) => x.name === f.name && x.size === f.size))]);
   const [startError, setStartError] = useState<unknown>(null);
 
   const cards = useMemo(() => {
@@ -108,6 +112,7 @@ export function Board() {
     setStartError(null);
     try {
       const id = await startQuote(files, app.toast);
+      setStaged([]);
       location.hash = `#/quotes/${id}`;
     } catch (err) {
       setStartError(err);
@@ -125,8 +130,30 @@ export function Board() {
         {seller && <button className="btn" onClick={() => start([])} disabled={!!busy}>Start a blank quote</button>}
       </div>
       {seller && (
-        <DropZone onFiles={start} busy={busy} title="Drop an RFQ here to start a quote"
-          hint="The customer's email from Outlook, a parts list or BOM spreadsheet, drawings, models — SnapQuote reads the email and the parts list for you." />
+        <DropZone onFiles={stage} busy={busy}
+          title={staged.length ? 'Drop more files, or start the quote below' : 'Drop an RFQ here to start a quote'}
+          hint="The customer's email from Outlook, a parts list or BOM spreadsheet, drawings, models. Add as many as you like, one at a time or together; SnapQuote reads the email and the parts list for you." />
+      )}
+      {seller && staged.length > 0 && (
+        <div className="card pad stack" style={{ marginTop: 10, gap: 8 }}>
+          <div className="spread">
+            <b>{staged.length === 1 ? '1 file' : `${staged.length} files`} for the new quote</b>
+            <span className="row">
+              <button className="btn ghost" onClick={() => setStaged([])} disabled={!!busy}>Clear</button>
+              <button className="btn primary" onClick={() => start(staged)} disabled={!!busy}>Start the quote</button>
+            </span>
+          </div>
+          <div className="files">
+            {staged.map((f) => (
+              <div className="file" key={`${f.name}-${f.size}`}>
+                <span className="ext">{f.name.split('.').pop()?.slice(0, 4)}</span>
+                <span className="grow" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.name}</span>
+                <span className="muted small nowrap">{fileSize(f.size)}</span>
+                <button className="closex" title={`Remove ${f.name}`} aria-label={`Remove ${f.name}`} onClick={() => setStaged(staged.filter((x) => x !== f))} disabled={!!busy}>×</button>
+              </div>
+            ))}
+          </div>
+        </div>
       )}
       <ErrorBanner error={startError} />
 
