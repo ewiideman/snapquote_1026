@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { post, message } from '../lib/api.ts';
+import { patch, post, message } from '../lib/api.ts';
 import type { Account, Department } from '../lib/types.ts';
 
 export function SignIn({ onSignedIn }: { onSignedIn: (a: Account, d: Department[]) => void }) {
@@ -37,13 +37,13 @@ export function SignIn({ onSignedIn }: { onSignedIn: (a: Account, d: Department[
   );
 }
 
-export function ChangePassword({ forced, onDone }: { forced?: boolean; onDone: () => void }) {
+export function ChangePassword({ forced, embedded, onDone }: { forced?: boolean; embedded?: boolean; onDone: () => void }) {
   const [current, setCurrent] = useState('');
   const [next, setNext] = useState('');
   const [again, setAgain] = useState('');
   const [error, setError] = useState<string | null>(null);
   const form = (
-    <form className={forced ? '' : 'card pad stack'} style={forced ? undefined : { maxWidth: 420 }} onSubmit={async (e) => {
+    <form className={forced ? '' : 'card pad stack'} style={forced ? undefined : { maxWidth: 520 }} onSubmit={async (e) => {
       e.preventDefault();
       if (next !== again) { setError('The two new passwords are different.'); return; }
       try {
@@ -62,5 +62,40 @@ export function ChangePassword({ forced, onDone }: { forced?: boolean; onDone: (
       <button className="btn primary" disabled={!current || next.length < 8}>Save password</button>
     </form>
   );
-  return forced ? <div className="signin">{form}</div> : <div className="page narrow">{form}</div>;
+  return forced ? <div className="signin">{form}</div> : embedded ? form : <div className="page narrow">{form}</div>;
+}
+
+/** Your account: the email address SnapQuote writes to, whether it does, and your password. */
+export function AccountPage({ account, onChanged }: { account: Account; onChanged: (a: Account, said: string) => void }) {
+  const [email, setEmail] = useState(account.email ?? '');
+  const [error, setError] = useState<string | null>(null);
+  const save = async (change: Record<string, unknown>, said: string) => {
+    setError(null);
+    try {
+      const r = await patch<{ account: Account }>('/session/me', change);
+      onChanged(r.account, said);
+    } catch (err) { setError(message(err)); }
+  };
+  return (
+    <div className="page narrow stack" style={{ gap: 16 }}>
+      <h1>{account.displayName}</h1>
+      <div className="card pad stack" style={{ maxWidth: 520 }}>
+        <h2>Email</h2>
+        <p className="muted">SnapQuote emails you when something needs you: a quote to price, prices back, a question, an answer. Nothing else.</p>
+        <label className="field">Your email address
+          <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="name@mack.com" />
+        </label>
+        <div className="row">
+          <button className="btn primary" disabled={email.trim() === (account.email ?? '')} onClick={() => save({ email }, 'Email address saved.')}>Save address</button>
+        </div>
+        <label className="row">
+          <input type="checkbox" checked={account.emailNotifications} onChange={(e) => save({ emailNotifications: e.target.checked }, e.target.checked ? 'SnapQuote will email you.' : 'SnapQuote will not email you.')} />
+          Email me when a quote needs me
+        </label>
+        {!account.email && account.emailNotifications && <div className="banner warn">Add your address, or SnapQuote has nowhere to write.</div>}
+        {error && <div className="banner error">{error}</div>}
+      </div>
+      <ChangePassword embedded onDone={() => onChanged(account, 'Your password is changed.')} />
+    </div>
+  );
 }

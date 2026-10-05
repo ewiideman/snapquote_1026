@@ -8,7 +8,7 @@ import type { Database } from './db.ts';
 import { PROJECT_ROOT } from './config.ts';
 import { HttpError } from '../persistence/util.ts';
 import {
-  changeOwnPassword, createAccount, listAccounts, listPeople, readCookie, sessionAccount, sessionCookie, signIn, signOut, updateAccount, SESSION_COOKIE, type Account,
+  changeOwnPassword, createAccount, updateOwnEmail, listAccounts, listPeople, readCookie, sessionAccount, sessionCookie, signIn, signOut, updateAccount, SESSION_COOKIE, type Account,
 } from '../persistence/accounts.ts';
 import {
   answerRequest, assignRequest, board, closeQuote, createQuote, customers, LOST_REASONS, markSent, postMessage, queue, quoteDetail, reviseQuote, saveEstimate, saveLines,
@@ -127,6 +127,11 @@ export function createApp(db: Database, options: AppOptions): express.Express {
     if (token) await signOut(db, token);
     res.set('set-cookie', sessionCookie('', { maxAgeSeconds: 0, secure: req.secure }));
     res.json({ account: null });
+  });
+  api.patch('/session/me', async (req, res) => {
+    const b = body(req);
+    await updateOwnEmail(db, me(res).id, { email: b['email'], emailNotifications: b['emailNotifications'] });
+    res.json({ account: await sessionAccount(db, res.locals['token'] as string) });
   });
   api.post('/session/password', async (req, res) => {
     const b = body(req);

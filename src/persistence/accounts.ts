@@ -56,15 +56,16 @@ export interface Account {
   role: Role;
   department: DepartmentKey | null;
   email: string | null;
+  emailNotifications: boolean;
   mustChangePassword: boolean;
 }
 
 type AccountRow = {
   id: string; display_name: string; role: Role; department: DepartmentKey | null; email: string | null;
-  must_change_password: boolean; password_hash: string | null; disabled_at: string | null;
+  email_notifications: boolean; must_change_password: boolean; password_hash: string | null; disabled_at: string | null;
 };
-const COLUMNS = 'id, display_name, role, department, email, must_change_password, password_hash, disabled_at';
-const toAccount = (r: AccountRow): Account => ({ id: r.id, displayName: r.display_name, role: r.role, department: r.department, email: r.email, mustChangePassword: r.must_change_password });
+const COLUMNS = 'id, display_name, role, department, email, email_notifications, must_change_password, password_hash, disabled_at';
+const toAccount = (r: AccountRow): Account => ({ id: r.id, displayName: r.display_name, role: r.role, department: r.department, email: r.email, emailNotifications: r.email_notifications, mustChangePassword: r.must_change_password });
 
 async function accountRow(db: Queryable, id: string): Promise<AccountRow | undefined> {
   return (await db.query<AccountRow>(`SELECT ${COLUMNS} FROM app.user_account WHERE id = $1`, [id]))[0];
@@ -147,6 +148,20 @@ export async function changeOwnPassword(db: Database, input: { userId: string; t
     await tx.query("UPDATE app.session SET ended_at = now(), ended_reason = 'password changed' WHERE user_id = $1 AND ended_at IS NULL AND token_sha256 <> $2", [row.id, sha256(input.token)]);
     await audit(tx, row.id, 'user_account.password_changed', 'user_account', row.id, { by: 'self' });
   });
+}
+
+/** A person's own email address and whether SnapQuote emails them. */
+export async function updateOwnEmail(db: Queryable, userId: string, input: { email?: unknown; emailNotifications?: unknown }): Promise<void> {
+  if (input.email !== undefined) {
+    const email = typeof input.email === 'string' ? input.email.trim() : '';
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new HttpError(400, 'That does not look like an email address.');
+    await db.query('UPDATE app.user_account SET email = $2 WHERE id = $1', [userId, email || null]);
+  }
+  if (input.emailNotifications !== undefined) {
+    if (typeof input.emailNotifications !== 'boolean') throw new HttpError(400, 'emailNotifications is true or false');
+    await db.query('UPDATE app.user_account SET email_notifications = $2 WHERE id = $1', [userId, input.emailNotifications]);
+  }
+  await audit(db, userId, 'user_account.email_set', 'user_account', userId, { emailNotifications: input.emailNotifications });
 }
 
 // ---------------------------------------------------------------- administration

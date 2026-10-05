@@ -24,6 +24,12 @@ Read README.md first. This file is the rules and where things stand.
   review, link status under Settings. Hours come only from calculator estimates; parts priced by hand
   or by departments without a calculator are listed as without hours. Until the scheduler writes
   `capacity.json`, SnapQuote shows hours without load and the Work cells page takes typed codes.
+- State (2026-10-05, ease of use): **email when a quote needs someone** (migration 0003:
+  `app.notification` outbox written in the same transaction as the step; `src/persistence/notify.ts`
+  composes and `sendQueued` sends; `src/server/mailTimer.ts` every 30 s through Mack's relay,
+  `SMTP_HOST`/`APP_URL`; never to the actor; skipped without an address or with
+  `email_notifications` off, set by each person on their account page). Quote page shows whether
+  changes are saved; revise/reopen and temporary passwords use dialogs, not browser prompts.
 - **On-prem only. Period.** The app, PostgreSQL and attached files run on Mack's server. No cloud
   service, no outside API, no CDN at run time. Libraries are npm packages bundled at build.
 - **American English** everywhere: code, comments, screens, docs.

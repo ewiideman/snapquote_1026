@@ -5,7 +5,7 @@ import { get, post, SIGNED_OUT_EVENT } from './lib/api.ts';
 import { useRoute } from './lib/router.ts';
 import type { Account, BoardCard, Department, QueueItem } from './lib/types.ts';
 import { AppContext, canSell, Toast, type AppState } from './components/ui.tsx';
-import { SignIn, ChangePassword } from './pages/SignIn.tsx';
+import { SignIn, ChangePassword, AccountPage } from './pages/SignIn.tsx';
 import { Board } from './pages/Board.tsx';
 import { Queue } from './pages/Queue.tsx';
 import { QuotePage } from './pages/Quote.tsx';
@@ -74,7 +74,7 @@ function App() {
   else if (path === '/queue' || (path === '/' && !seller)) page = <Queue department={route.query.get('department')} />;
   else if (path === '/settings') page = <Settings />;
   else if (path === '/work-cells') page = <WorkCells />;
-  else if (path === '/account') page = <ChangePassword onDone={() => { state.toast('Your password is changed.'); location.hash = '#/'; }} />;
+  else if (path === '/account') page = <AccountPage account={account} onChanged={(a, said) => { setSession({ account: a, departments: session.departments }); state.toast(said); }} />;
   else page = <Board />;
 
   const on = (p: string) => (p === '/' ? (path === '/' || path === '/board') : path.startsWith(p)) ? 'on' : '';

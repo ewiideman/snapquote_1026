@@ -18,6 +18,10 @@ export interface AppConfig {
   sessionHours: number;
   /** STORAGE_DIR: where attached files are kept. ./storage by default. */
   storageDir: string;
+  /** SMTP_HOST (with SMTP_PORT, SMTP_FROM, SMTP_USER, SMTP_PASSWORD): Mack's mail relay for quote emails; null sends none. */
+  mail: { host: string; port: number; from: string; user: string | null; password: string | null } | null;
+  /** APP_URL: the address people open SnapQuote at, for links in emails, e.g. http://mack-server:3200. */
+  appUrl: string | null;
   /** MACK_EXCHANGE_DIR: the folder SnapQuote and the Production Scheduler exchange files in; null, no exchange. */
   exchangeDir: string | null;
 }
@@ -42,6 +46,14 @@ function sessionHoursFrom(raw: string | undefined): number {
   return n;
 }
 
+function mailFrom(env: Record<string, string | undefined>): AppConfig['mail'] {
+  const host = env['SMTP_HOST']?.trim();
+  if (!host) return null;
+  const port = Number(env['SMTP_PORT'] ?? 25);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error(`SMTP_PORT must be a port number, not "${env['SMTP_PORT']}".`);
+  return { host, port, from: env['SMTP_FROM']?.trim() || 'snapquote@mack.com', user: env['SMTP_USER']?.trim() || null, password: env['SMTP_PASSWORD'] ?? null };
+}
+
 export function loadConfig(overrides: { databaseUrlVar?: string } = {}): AppConfig {
   const env = { ...loadDotEnv(), ...process.env };
   const varName = overrides.databaseUrlVar ?? 'DATABASE_URL';
@@ -57,5 +69,7 @@ export function loadConfig(overrides: { databaseUrlVar?: string } = {}): AppConf
     sessionHours: sessionHoursFrom(env['SESSION_HOURS']),
     storageDir: isAbsolute(storage) ? storage : join(PROJECT_ROOT, storage),
     exchangeDir: env['MACK_EXCHANGE_DIR']?.trim() || null,
+    mail: mailFrom(env),
+    appUrl: env['APP_URL']?.trim() || null,
   };
 }

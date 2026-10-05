@@ -4,6 +4,7 @@
 import type { Database, Queryable } from '../server/db.ts';
 import type { Account } from './accounts.ts';
 import { audit, HttpError } from './util.ts';
+import { estimatorsOf, notify, quoteFacts } from './notify.ts';
 import { DEPARTMENTS, departmentName, isDepartment, type DepartmentKey } from '../quoting/departments.ts';
 import {
   buildSheet, lineQuantities, qtyKey, sendToEstimatingProblems, stageOf, waitingOn,
@@ -412,7 +413,10 @@ async function reopenFor(db: Queryable, actor: Account, quoteId: number, departm
   const unique = [...new Set(departments.filter((d): d is DepartmentKey => !!d))];
   for (const d of unique) {
     const rows = await db.query("UPDATE quote.request SET status = 'open', answered_at = NULL, answered_by = NULL WHERE quote_id = $1 AND department = $2 AND status = 'answered' RETURNING id", [quoteId, d]);
-    if (rows.length) await event(db, quoteId, actor.id, `${why} ${departmentName(d)} has it back to check its prices.`, d);
+    if (rows.length) {
+      await event(db, quoteId, actor.id, `${why} ${departmentName(d)} has it back to check its prices.`, d);
+      await notify(db, await estimatorsOf(db, d), actor.id, await quoteFacts(db, quoteId), 'request.reopened', { department: d, actorName: actor.displayName });
+    }
   }
 }
 
@@ -430,6 +434,7 @@ async function syncRequests(db: Queryable, actor: Account, quoteId: number, need
     if (live.some((r) => r.department === d)) continue;
     await db.query('INSERT INTO quote.request (quote_id, department, needed_by, sent_by) VALUES ($1, $2, $3, $4)', [quoteId, d, neededBy, actor.id]);
     await event(db, quoteId, actor.id, `Sent to ${departmentName(d)}.`, d);
+    await notify(db, await estimatorsOf(db, d), actor.id, await quoteFacts(db, quoteId), 'request.new', { department: d, actorName: actor.displayName, neededBy });
   }
 }
 
@@ -543,7 +548,10 @@ export async function saveEstimate(db: Database, actor: Account, lineId: number,
     for (const p of prices) await tx.query('INSERT INTO quote.estimate_price (estimate_id, quantity, unit_price) VALUES ($1, $2, $3)', [est[0]?.id, p.quantity, p.unitPrice]);
     // A new price after the department answered means its answer changed: business development sees it on the quote.
     const answered = await tx.query("SELECT 1 FROM quote.request WHERE quote_id = $1 AND department = $2 AND status = 'answered'", [line.quote_id, line.department]);
-    if (answered.length) await event(tx, line.quote_id, actor.id, `${actor.displayName} changed a ${departmentName(line.department)} price after answering.`, line.department);
+    if (answered.length) {
+      await event(tx, line.quote_id, actor.id, `${actor.displayName} changed a ${departmentName(line.department)} price after answering.`, line.department);
+      await notify(tx, [q.ownerId], actor.id, await quoteFacts(tx, line.quote_id), 'price.changed', { department: line.department, actorName: actor.displayName });
+    }
     await touch(tx, line.quote_id);
     await audit(tx, actor.id, 'estimate.saved', 'line', lineId, { basis, prices: prices.length });
   });
@@ -566,6 +574,8 @@ export async function answerRequest(db: Database, actor: Account, quoteId: numbe
     if (missing.length) throw new HttpError(400, `Price every quantity first: ${missing.map((l) => l.partNumber || l.description || `line ${l.position}`).join(', ')}.`);
     await tx.query("UPDATE quote.request SET status = 'answered', answered_at = now(), answered_by = $2 WHERE id = $1", [req.id, actor.id]);
     await event(tx, quoteId, actor.id, `${departmentName(department)} priced its parts (${actor.displayName}).`, department);
+    const allIn = detail.requests.every((r) => r.department === department || r.status === 'answered');
+    await notify(tx, [detail.quote.ownerId], actor.id, await quoteFacts(tx, quoteId), allIn ? 'quote.ready' : 'prices.back', { department, actorName: actor.displayName });
     await touch(tx, quoteId);
     await audit(tx, actor.id, 'request.answered', 'quote', quoteId, { department });
   });
@@ -596,10 +606,16 @@ export async function postMessage(db: Database, actor: Account, quoteId: number,
       const rows = await tx.query("UPDATE quote.request SET status = 'question' WHERE quote_id = $1 AND department = $2 AND status IN ('open', 'answered') RETURNING id", [quoteId, department]);
       if (!rows.length) throw new HttpError(409, `${departmentName(department)} has nothing open on this quote to ask about.`);
       kind = 'question';
+      const facts = await quoteFacts(tx, quoteId);
+      await notify(tx, [facts.ownerId], actor.id, facts, 'question.asked', { department, actorName: actor.displayName, text: body });
     } else if (canSell(actor)) {
       // Business development writing while a department waits on it answers that department.
       const answered = await tx.query<{ department: DepartmentKey }>("UPDATE quote.request SET status = 'open' WHERE quote_id = $1 AND status = 'question' RETURNING department", [quoteId]);
-      if (answered.length) kind = 'answer';
+      if (answered.length) {
+        kind = 'answer';
+        const facts = await quoteFacts(tx, quoteId);
+        for (const a of answered) await notify(tx, await estimatorsOf(tx, a.department), actor.id, facts, 'question.answered', { department: a.department, actorName: actor.displayName, text: body });
+      }
     }
     await tx.query('INSERT INTO quote.message (quote_id, department, author_id, kind, body) VALUES ($1, $2, $3, $4, $5)', [quoteId, department, actor.id, kind, body]);
     await touch(tx, quoteId);

@@ -5,7 +5,7 @@ import { get, patch, post, put, upload, del } from '../lib/api.ts';
 import { useAsync } from '../lib/useAsync.ts';
 import type { DepartmentKey, DropResult, Line, QuoteDetail } from '../lib/types.ts';
 import { STAGE_NAMES } from '../lib/types.ts';
-import { canEstimate, canSell, DeptChip, DropZone, Due, ErrorBanner, useApp } from '../components/ui.tsx';
+import { canEstimate, canSell, DeptChip, Dialog, DropZone, Due, ErrorBanner, useApp } from '../components/ui.tsx';
 import { ago, fileSize, qty, shortDate, usd } from '../lib/format.ts';
 import { PricePanel } from './PricePanel.tsx';
 
@@ -51,6 +51,39 @@ function Quantities({ value, onChange, disabled }: { value: number[]; onChange: 
   );
 }
 
+// ---------------------------------------------------------------- saving
+
+export type SaveState = 'idle' | 'saving' | 'saved' | 'error';
+
+/** Everything saves as you go; this says so, so nobody wonders whether to look for a Save button. */
+function SaveStatus({ state, dirty }: { state: SaveState; dirty: boolean }) {
+  if (state === 'saving') return <span className="save-status">Saving…</span>;
+  if (state === 'error') return <span className="save-status bad">Not saved — see the message below</span>;
+  if (dirty) return <span className="save-status">Saves when you leave the field</span>;
+  if (state === 'saved') return <span className="save-status ok">✓ All changes saved</span>;
+  return <span className="save-status">Changes save as you go</span>;
+}
+
+/** Back to the departments as a new revision, with what the customer asked for. */
+function ReviseDialog({ d, reopen, onClose, onDone }: { d: QuoteDetail; reopen: boolean; onClose: () => void; onDone: (n: QuoteDetail) => void }) {
+  const [reason, setReason] = useState('');
+  const [error, setError] = useState<unknown>(null);
+  return (
+    <Dialog title={reopen ? `Reopen ${d.quote.number}` : `Revise ${d.quote.number}`} onClose={onClose} footer={<>
+      <button className="btn" onClick={onClose}>Cancel</button>
+      <button className="btn primary" disabled={!reason.trim()} onClick={async () => {
+        try { onDone(await post(`/quotes/${d.quote.id}/revise`, { reason })); } catch (err) { setError(err); }
+      }}>Open revision {d.quote.revision + 1}</button>
+    </>}>
+      <p className="muted">The quote goes back to being worked on as revision {d.quote.revision + 1}. Prices stay as they are until you change a part; the departments whose parts change get it back.</p>
+      <label className="field">{reopen ? 'Why is it being reopened?' : 'What did the customer ask to change?'}
+        <textarea value={reason} onChange={(e) => setReason(e.target.value)} autoFocus placeholder={reopen ? 'e.g. The customer came back with a new quantity' : 'e.g. Add 2,500; drop the 100 quantity'} />
+      </label>
+      <ErrorBanner error={error} />
+    </Dialog>
+  );
+}
+
 // ---------------------------------------------------------------- steps and the next thing to do
 
 function Steps({ d }: { d: QuoteDetail }) {
@@ -90,6 +123,7 @@ function NextStep({ d, lines, reload, setError, dirty }: { d: QuoteDetail; lines
   const seller = canSell(app.account);
   const [neededBy, setNeededBy] = useState('');
   const [closing, setClosing] = useState<null | 'won' | 'lost' | 'no_bid'>(null);
+  const [revising, setRevising] = useState(false);
   const run = async (fn: () => Promise<QuoteDetail>) => {
     setError(null);
     try { reload(await fn()); app.refreshCounts(); } catch (err) { setError(err); }
@@ -152,9 +186,10 @@ function NextStep({ d, lines, reload, setError, dirty }: { d: QuoteDetail; lines
           <p><b>With {d.quote.customerName} since {shortDate(d.quote.sentAt)}.</b><span className="muted">When you hear back, record it — won quotes are how the plant sees what is coming.</span></p>
           <button className="btn primary" onClick={() => setClosing('won')}>Won</button>
           <button className="btn" onClick={() => setClosing('lost')}>Lost</button>
-          <button className="btn ghost" onClick={async () => { const reason = prompt('What did the customer ask to change?'); if (reason !== null) await run(() => post(`/quotes/${d.quote.id}/revise`, { reason })); }}>Revise</button>
+          <button className="btn ghost" onClick={() => setRevising(true)}>Revise</button>
         </div>
         {closing && <CloseDialog d={d} outcome={closing} onClose={() => setClosing(null)} onDone={(n) => { setClosing(null); reload(n); app.refreshCounts(); }} />}
+        {revising && <ReviseDialog d={d} reopen={false} onClose={() => setRevising(false)} onDone={(n) => { setRevising(false); reload(n); app.refreshCounts(); }} />}
       </>
     );
   }
@@ -162,7 +197,8 @@ function NextStep({ d, lines, reload, setError, dirty }: { d: QuoteDetail; lines
     <div className="next calm">
       <p><b>{STAGE_NAMES[d.stage]}{d.quote.closedAt ? ` on ${shortDate(d.quote.closedAt)}` : ''}.</b>
         <span className="muted">{[d.quote.closeReason, d.quote.poNumber ? `PO ${d.quote.poNumber}` : '', d.quote.awardAmount !== null ? usd(d.quote.awardAmount, 0) : ''].filter(Boolean).join(' · ')}</span></p>
-      <button className="btn ghost" onClick={async () => { const reason = prompt('Why is it being reopened?'); if (reason !== null) await run(() => post(`/quotes/${d.quote.id}/revise`, { reason })); }}>Reopen as a revision</button>
+      <button className="btn ghost" onClick={() => setRevising(true)}>Reopen as a revision</button>
+      {revising && <ReviseDialog d={d} reopen onClose={() => setRevising(false)} onDone={(n) => { setRevising(false); reload(n); app.refreshCounts(); }} />}
     </div>
   );
 }
@@ -229,7 +265,7 @@ type Draft = Pick<Line, 'partNumber' | 'revision' | 'description' | 'qtyPer' | '
 const toDraft = (l: Line): Draft => ({ id: l.id, key: String(l.id), partNumber: l.partNumber, revision: l.revision, description: l.description, qtyPer: l.qtyPer, department: l.department, notes: l.notes, quantities: l.quantities });
 const blank = (): Draft => ({ id: null, key: `new-${Math.random()}`, partNumber: '', revision: '', description: '', qtyPer: 1, department: null, notes: '', quantities: [] });
 
-function Parts({ d, editable, onSaved, onDirty, openPrice }: { d: QuoteDetail; editable: boolean; onSaved: (n: QuoteDetail) => void; onDirty: (b: boolean) => void; openPrice: (l: Line) => void }) {
+function Parts({ d, editable, onSaved, onDirty, onSaveState, openPrice }: { d: QuoteDetail; editable: boolean; onSaved: (n: QuoteDetail) => void; onDirty: (b: boolean) => void; onSaveState: (s: SaveState) => void; openPrice: (l: Line) => void }) {
   const app = useApp();
   const [rows, setRows] = useState<Draft[]>(() => d.lines.map(toDraft));
   const [dirty, setDirty] = useState(false);
@@ -245,6 +281,7 @@ function Parts({ d, editable, onSaved, onDirty, openPrice }: { d: QuoteDetail; e
     if (saving.current) { pending.current = next; return; }
     saving.current = true;
     setError(null);
+    onSaveState('saving');
     try {
       const r = await put<{ quote: QuoteDetail }>(`/quotes/${d.quote.id}/lines`, {
         lines: next.map((x) => ({ id: x.id, partNumber: x.partNumber, revision: x.revision, description: x.description, qtyPer: x.qtyPer, department: x.department, notes: x.notes, quantities: x.quantities })),
@@ -260,9 +297,11 @@ function Parts({ d, editable, onSaved, onDirty, openPrice }: { d: QuoteDetail; e
       }
       setDirty(false);
       onSaved(r.quote);
+      onSaveState('saved');
     } catch (err) {
       pending.current = null;
       setError(err);
+      onSaveState('error');
     } finally {
       saving.current = false;
     }
@@ -298,7 +337,7 @@ function Parts({ d, editable, onSaved, onDirty, openPrice }: { d: QuoteDetail; e
           <thead>
             <tr>
               <th className="tight">#</th><th>Part number</th><th className="tight">Rev</th><th>Description</th>
-              <th className="tight right" title="How many go into one assembly">Per assy</th><th>Priced by</th>
+              <th className="tight right" title="How many of this part go into one assembly">Qty per assembly</th><th>Who prices it</th>
               {showPrices && <th className="tight right">{firstQty ? `Each at ${qty(firstQty)}` : 'Price'}</th>}
               <th className="tight" />
             </tr>
@@ -331,7 +370,7 @@ function Parts({ d, editable, onSaved, onDirty, openPrice }: { d: QuoteDetail; e
                   )}
                   <td className="tight">
                     {mineToPrice && line && <button className={`btn small ${line.estimate ? '' : 'primary'}`} onClick={() => openPrice(line)}>{line.estimate ? 'Change price' : 'Price it'}</button>}
-                    {!mineToPrice && line?.estimate && <button className="btn small ghost" onClick={() => openPrice(line)}>How priced</button>}
+                    {!mineToPrice && line?.estimate && <button className="btn small ghost" onClick={() => openPrice(line)}>See price</button>}
                     {editable && <button className="closex" title="Remove this part" onClick={() => { const next = rows.filter((x) => x.key !== r.key); setRows(next); setDirty(true); void save(next); }}>×</button>}
                   </td>
                 </tr>
@@ -463,9 +502,11 @@ export function QuotePage({ id }: { id: number }) {
   const closed = !!q && ['won', 'lost', 'no_bid'].includes(q.status);
   const editableHeader = seller && !closed;
   const editableParts = seller && !!q && (q.status === 'draft' || q.status === 'estimating');
+  const [saveState, setSaveState] = useState<SaveState>('idle');
   const save = async (change: Record<string, unknown>) => {
     setActionError(null);
-    try { setD(await patch(`/quotes/${id}`, change)); } catch (err) { setActionError(err); }
+    setSaveState('saving');
+    try { setD(await patch(`/quotes/${id}`, change)); setSaveState('saved'); } catch (err) { setActionError(err); setSaveState('error'); }
   };
   const customerList = useMemo(() => customers.data ?? [], [customers.data]);
 
@@ -479,6 +520,7 @@ export function QuotePage({ id }: { id: number }) {
             <a href="#/">Quotes</a> / <span className="mono">{q.number}{q.revision ? ` rev ${q.revision}` : ''}</span>
             {q.itar && <span className="chip itar">ITAR</span>}
             <span className="chip">{STAGE_NAMES[d.stage]}</span>
+            {editableHeader && <SaveStatus state={saveState} dirty={partsDirty} />}
           </div>
           <h1>{editableHeader
             ? <input defaultValue={q.title} key={`t${q.updatedAt}`} placeholder="What is the customer asking for?" onBlur={(e) => e.target.value !== q.title && save({ title: e.target.value })} />
@@ -538,7 +580,7 @@ export function QuotePage({ id }: { id: number }) {
               </div>
             </div>
           </div>
-          <Parts d={d} editable={editableParts} onSaved={setD} onDirty={setPartsDirty} openPrice={setPricing} />
+          <Parts d={d} editable={editableParts} onSaved={setD} onDirty={setPartsDirty} onSaveState={setSaveState} openPrice={setPricing} />
           {d.requests.length > 0 && (
             <div className="row wrap small">
               <span className="muted">Departments:</span>

@@ -21,6 +21,12 @@ async function signIn(browser: Browser, id: string): Promise<Page> {
 
 test('from RFQ email to won', async ({ browser }) => {
   const jon = await signIn(browser, 'jon');
+  // His own email address, for the emails SnapQuote sends him.
+  await jon.goto('/#/account');
+  await jon.getByLabel('Your email address').fill('jon.whitney@mack.com');
+  await jon.getByRole('button', { name: 'Save address' }).click();
+  await expect(jon.getByText('Email address saved.')).toBeVisible();
+  await jon.goto('/');
   await expect(jon.getByText('Good', { exact: false }).first()).toBeVisible();
   await jon.locator('.drop input[type=file]').setInputFiles({ name: 'RFQ.eml', mimeType: 'message/rfc822', buffer: Buffer.from(eml) });
   await expect(jon).toHaveURL(/#\/quotes\/\d+$/);
@@ -31,6 +37,7 @@ test('from RFQ email to won', async ({ browser }) => {
 
   await jon.getByPlaceholder('Type a name — new ones are added').fill('Acme Medical');
   await jon.getByPlaceholder('Type a name — new ones are added').blur();
+  await expect(jon.getByText('✓ All changes saved')).toBeVisible();
   await jon.getByPlaceholder('e.g. 100, 500, 1k').fill('100, 500');
   await jon.keyboard.press('Enter');
   await expect(jon.locator('.qty-chips .q')).toHaveCount(2);
@@ -89,4 +96,11 @@ test('from RFQ email to won', async ({ browser }) => {
   await jon.goto('/');
   await jon.getByRole('button', { name: "Everyone's" }).click();
   await expect(jon.locator('.column', { hasText: 'Closed lately' }).getByText('Acme Medical')).toBeVisible();
+
+  // The customer came back: reopen it as a revision, in a dialog rather than a browser prompt.
+  await jon.goto(url);
+  await jon.getByRole('button', { name: 'Reopen as a revision' }).click();
+  await jon.getByLabel('Why is it being reopened?').fill('New quantity of 2,500');
+  await jon.getByRole('button', { name: 'Open revision 1' }).click();
+  await expect(jon.locator('.qhead .number')).toContainText('rev 1');
 });

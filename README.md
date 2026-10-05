@@ -27,6 +27,14 @@ It calls no outside service.
    assembly. Business development can set its own price with a reason. The customer's copy is a PDF.
 5. **Record the outcome**: won (PO number, value), lost (why), or no bid. A revision reopens it.
 
+## Email
+
+SnapQuote emails a person when a quote needs them, and only then: a department when a quote arrives
+or comes back to it after a change, business development when a department asks a question, answers
+come back, prices come back, or every department has priced (ready to send). Nobody is emailed about
+their own step. Mail goes through Mack's relay (`SMTP_HOST`); each person sets their address and can
+turn the emails off under their name. Without a relay, emails wait in `app.notification`.
+
 ## The link to the Production Scheduler
 
 SnapQuote's side is built; the scheduler's is not yet, and the scheduler is being kept separate for

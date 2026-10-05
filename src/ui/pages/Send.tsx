@@ -179,7 +179,7 @@ export function SendPage({ id }: { id: number }) {
         {assembly ? (
           <table className="grid">
             <thead>
-              <tr><th>Part</th><th>Priced by</th><th className="right tight">Per assy</th>{q.quantities.map((b) => <th key={b} className="right">at {qty(b)}</th>)}<th className="right">One-time</th><th className="right">Lead</th></tr>
+              <tr><th>Part</th><th>Priced by</th><th className="right tight">Qty per assembly</th>{q.quantities.map((b) => <th key={b} className="right">at {qty(b)}</th>)}<th className="right">One-time</th><th className="right">Lead</th></tr>
             </thead>
             <tbody>
               {lines.map(({ line, sheet }) => sheet && (

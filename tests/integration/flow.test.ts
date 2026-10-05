@@ -14,6 +14,7 @@ import { createAccount } from '../../src/persistence/accounts.ts';
 import { createApp } from '../../src/server/app.ts';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { writeQuotesFile } from '../../src/persistence/exchange.ts';
+import { sendQueued } from '../../src/persistence/notify.ts';
 
 let db: Database;
 let server: Server;
@@ -226,6 +227,24 @@ test('a quote from RFQ email to won', async () => {
   const card = (await jon('GET', '/board')).body.find((c: any) => c.id === qid);
   assert.equal(card.stage, 'won');
   assert.equal(card.awardAmount, 25000);
+
+  // The emails: each step told the people it needed, never the person who took it.
+  const mails = await db.query<{ to_user: string; kind: string; subject: string }>('SELECT to_user, kind, subject FROM app.notification WHERE quote_id = $1 ORDER BY id', [qid]);
+  const got = (kind: string) => mails.filter((m) => m.kind === kind).map((m) => m.to_user).sort();
+  assert.deepEqual(got('request.new'), ['buyer', 'metals.est']);
+  assert.deepEqual(got('question.asked'), ['jon.whitney']);
+  assert.deepEqual(got('question.answered'), ['buyer']);
+  assert.deepEqual(got('prices.back'), ['jon.whitney']);
+  assert.deepEqual(got('quote.ready'), ['jon.whitney', 'jon.whitney'], 'ready once, and again after Metals re-priced the changed part');
+  assert.deepEqual(got('request.reopened'), ['metals.est']);
+  assert.ok(mails.every((m) => !(m.kind === 'request.new' && m.to_user === 'jon.whitney')), 'nobody is told about their own step');
+  assert.match(mails.find((m) => m.kind === 'quote.ready')?.subject ?? '', /^Ready to send: Q\d\d-\d{4} Acme Medical/);
+  const outbox: { to: string; subject: string; text: string }[] = [];
+  const delivery = await sendQueued(db, { send: async (to, subject, text) => { outbox.push({ to, subject, text }); } }, 'http://mack-server:3200');
+  assert.ok(delivery.sent > 0 && delivery.skipped > 0, 'Jon has an address; the estimators in this test do not');
+  assert.ok(outbox.every((m) => m.to === 'jon.whitney@mack.com'));
+  assert.match(outbox[0]?.text ?? '', /Open it: http:\/\/mack-server:3200\/#\/quotes\/\d+/);
+  assert.equal((await db.query("SELECT count(*)::int AS n FROM app.notification WHERE status = 'queued'"))[0]?.n, 0);
 
   // What the scheduler is told: the won quote, its ordered quantity, hours per work cell and facility.
   await writeQuotesFile(db, exchangeDir);

@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { get, patch, post, put } from '../lib/api.ts';
 import { useAsync } from '../lib/useAsync.ts';
 import type { Role } from '../lib/types.ts';
-import { ErrorBanner, NumberInput, useApp } from '../components/ui.tsx';
+import { Dialog, ErrorBanner, NumberInput, useApp } from '../components/ui.tsx';
 import { ago } from '../lib/format.ts';
 
 const ROLE_NAMES: Record<Role, string> = { sales: 'Business development', estimator: 'Estimator', manager: 'Manager', administrator: 'Administrator' };
@@ -15,6 +15,8 @@ function Accounts() {
   const list = useAsync(() => get<Listing[]>('/users'), []);
   const [f, setF] = useState({ id: '', displayName: '', role: 'sales' as Role, department: '', email: '', password: '' });
   const [error, setError] = useState<unknown>(null);
+  const [passwordFor, setPasswordFor] = useState<Listing | null>(null);
+  const [temp, setTemp] = useState('');
   const act = async (fn: () => Promise<unknown>, said: string) => {
     setError(null);
     try { await fn(); list.reload(); app.toast(said); } catch (err) { setError(err); }
@@ -38,7 +40,7 @@ function Accounts() {
               </select></td>
               <td className="muted small">{a.lastSignedInAt ? ago(a.lastSignedInAt) : a.canSignIn ? 'never' : 'cannot sign in'}</td>
               <td className="tight">
-                <button className="btn small ghost" onClick={() => { const p = prompt(`A temporary password for ${a.displayName} (at least 8 characters)`); if (p) void act(() => patch(`/users/${a.id}`, { password: p }), `Temporary password set for ${a.displayName}.`); }}>Set password</button>
+                <button className="btn small ghost" onClick={() => setPasswordFor(a)}>Set password</button>
                 {a.id !== app.account.id && <button className="btn small ghost" onClick={() => act(() => patch(`/users/${a.id}`, { disabled: !a.disabledAt }), a.disabledAt ? `${a.displayName} can sign in again.` : `${a.displayName} can no longer sign in.`)}>{a.disabledAt ? 'Enable' : 'Disable'}</button>}
               </td>
             </tr>
@@ -56,6 +58,15 @@ function Accounts() {
           <label className="field">Temporary password<input value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} /></label>
         </div>
         <ErrorBanner error={error} />
+        {passwordFor && (
+          <Dialog title={`Temporary password for ${passwordFor.displayName}`} onClose={() => { setPasswordFor(null); setTemp(''); }} footer={<>
+            <button className="btn" onClick={() => { setPasswordFor(null); setTemp(''); }}>Cancel</button>
+            <button className="btn primary" disabled={temp.length < 8} onClick={() => { const who = passwordFor; void act(() => patch(`/users/${who.id}`, { password: temp }), `Temporary password set for ${who.displayName}.`); setPasswordFor(null); setTemp(''); }}>Set it</button>
+          </>}>
+            <p className="muted">Tell them in person or by phone. They choose their own the first time they sign in, and any session they have open now ends.</p>
+            <label className="field">Temporary password (at least 8 characters)<input value={temp} onChange={(e) => setTemp(e.target.value)} autoFocus /></label>
+          </Dialog>
+        )}
         <div><button className="btn primary" disabled={!f.displayName || f.password.length < 8} onClick={() => act(async () => {
           await post('/users', { ...f, id: f.id || f.displayName.toLowerCase().trim().replace(/\s+/g, '.'), department: f.department || null });
           setF({ id: '', displayName: '', role: 'sales', department: '', email: '', password: '' });

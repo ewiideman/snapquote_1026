@@ -4,7 +4,7 @@ export type Role = 'sales' | 'estimator' | 'manager' | 'administrator';
 export type Stage = 'draft' | 'estimating' | 'ready' | 'sent' | 'won' | 'lost' | 'no_bid';
 export type RequestStatus = 'open' | 'question' | 'answered' | 'withdrawn';
 
-export interface Account { id: string; displayName: string; role: Role; department: DepartmentKey | null; email: string | null; mustChangePassword: boolean }
+export interface Account { id: string; displayName: string; role: Role; department: DepartmentKey | null; email: string | null; emailNotifications: boolean; mustChangePassword: boolean }
 export interface Department { key: DepartmentKey; name: string }
 export interface Person { id: string; displayName: string; role: Role; department: DepartmentKey | null }
 
