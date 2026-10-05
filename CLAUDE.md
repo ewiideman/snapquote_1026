@@ -13,7 +13,7 @@ Read README.md first. This file is the rules and where things stand.
   `MACK_EXCHANGE_DIR` on Mack's server (Eric Wiideman, Oct 5: file drop first; quotes into the
   scheduler first; Chris Glaski ties work cells to XA facilities). `src/quoting/exchange.ts` (pure:
   formats `mack.snapquote.quotes` / `mack.scheduler.capacity` v1, `metalsHours` = setup once + run
-  minutes × pieces ÷ 60, standard hours, no efficiency; `workCellCapacity` adds a work cell's
+  minutes × pieces ÷ 60, standard hours; compared with the scheduler's clock hours only after ÷ the facility's `efficiency` from capacity.json; `workCellCapacity` adds a work cell's
   facilities), `src/persistence/exchange.ts` (writes `snapquote/quotes.json` atomically: estimating,
   sent, won ≤ 90 days; reads `scheduler/capacity.json` by mtime), `src/server/exchangeTimer.ts` (every
   10 min, at start, and on a win). Migration 0002: `pricing.work_cell_facility` (no row = not tied;

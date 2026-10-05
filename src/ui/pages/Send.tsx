@@ -103,7 +103,7 @@ function PlantCapacity({ id, version }: { id: number; version: string }) {
                   <td className="right">{c ? qty(c.hoursPerWeek) : ''}</td>
                   <td className="right">{c ? <span className={`chip ${loadTone(c.load) === 'ok' ? '' : loadTone(c.load)}`}>{pct(c.load)}</span> : ''}</td>
                   <td className="small">{c && file ? caughtUpWords(c, file.horizonWeeks) : ''}</td>
-                  <td className="right small">{c && c.hoursPerWeek > 0 ? `${qty(Math.round((biggest / c.hoursPerWeek) * 100) / 100)} wk of it` : ''}</td>
+                  <td className="right small">{c && c.hoursPerWeek > 0 ? `${qty(Math.round((biggest / c.efficiency / c.hoursPerWeek) * 100) / 100)} wk of it` : ''}</td>
                 </tr>
               );
             })}
@@ -111,7 +111,7 @@ function PlantCapacity({ id, version }: { id: number; version: string }) {
         </table>
       )}
       <div className="body muted small stack" style={{ gap: 4 }}>
-        <span>Hours are standard hours from the Metals calculator: each operation's setup once, plus run time per piece. Load is late work plus the next six weeks, against six weeks of the schedule's hours. The quote is not in the schedule; it is shown beside it.</span>
+        <span>Hours are standard hours from the Metals calculator: each operation's setup once, plus run time per piece. The scheduler's hours are clock hours, so a quote's hours are divided by the work cell's efficiency (0.85 in Metals) before they are set against them. Load is late work plus the next six weeks, against six weeks of the schedule's hours. The quote is not in the schedule; it is shown beside it.</span>
         {data.withoutHours.length > 0 && <span>No hours for {data.withoutHours.map((w) => `${w.partNumber} (${w.reason})`).join(', ')}.</span>}
         {data.rows.some((r) => r.facilities === null) && <span>A work cell not tied to its XA facility yet can be tied under Work cells.</span>}
       </div>

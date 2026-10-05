@@ -18,9 +18,9 @@ test('hours per work cell: one setup per lot plus run minutes × pieces, operati
 const file: CapacityFile = {
   format: CAPACITY_FORMAT, version: 1, writtenAt: '2026-10-05T15:00:00Z', horizonWeeks: 12, basis: 'test',
   departments: [{ key: 'metals', label: 'Metals', asOf: '2026-10-05T14:00:00Z', scheduleName: 'Metals', facilities: [
-    { code: '7/V85', name: 'V85', hoursPerWeek: 100, lateHours: 50, nextSixWeeksHours: 400, load: 0.75, caughtUpWeek: 2 },
-    { code: '7/V130', name: 'V130', hoursPerWeek: 50, lateHours: 0, nextSixWeeksHours: 200, load: 0.67, caughtUpWeek: 0 },
-    { code: '7/E18', name: 'E18', hoursPerWeek: 20, lateHours: 300, nextSixWeeksHours: 0, load: 2.5, caughtUpWeek: null },
+    { code: '7/V85', name: 'V85', efficiency: 0.85, hoursPerWeek: 100, lateHours: 50, nextSixWeeksHours: 400, load: 0.75, caughtUpWeek: 2 },
+    { code: '7/V130', name: 'V130', efficiency: 0.85, hoursPerWeek: 50, lateHours: 0, nextSixWeeksHours: 200, load: 0.67, caughtUpWeek: 0 },
+    { code: '7/E18', name: 'E18', efficiency: 0.85, hoursPerWeek: 20, lateHours: 300, nextSixWeeksHours: 0, load: 2.5, caughtUpWeek: null },
   ] }],
 };
 
@@ -30,6 +30,7 @@ test('a work cell of several facilities adds them; the latest catch-up week wins
   assert.equal(c.load, 0.72); // (50 + 600) / 900
   assert.equal(c.caughtUpWeek, 2);
   assert.deepEqual(c.unknown, ['7/NOPE']);
+  assert.equal(c.efficiency, 0.85);
   assert.equal(workCellCapacity(file, 'metals', ['7/V85', '7/E18']).caughtUpWeek, null);
   assert.equal(workCellCapacity(file, 'metals', ['7/NOPE']).load, null);
 });

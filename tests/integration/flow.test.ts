@@ -199,7 +199,7 @@ test('a quote from RFQ email to won', async () => {
   writeFileSync(join(exchangeDir, 'scheduler', 'capacity.json'), JSON.stringify({
     format: 'mack.scheduler.capacity', version: 1, writtenAt: new Date().toISOString(), horizonWeeks: 12, basis: 'test',
     departments: [{ key: 'metals', label: 'Metals', asOf: new Date().toISOString(), scheduleName: 'Metals', facilities: [
-      { code: '7/L72', name: 'FIBER LASER L72', hoursPerWeek: 120, lateHours: 30, nextSixWeeksHours: 600, load: 0.88, caughtUpWeek: 1 },
+      { code: '7/L72', name: 'FIBER LASER L72', efficiency: 0.85, hoursPerWeek: 120, lateHours: 30, nextSixWeeksHours: 600, load: 0.88, caughtUpWeek: 1 },
     ] }],
   }));
   cap = (await jon('GET', `/quotes/${qid}/capacity`)).body;

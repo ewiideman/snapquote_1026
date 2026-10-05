@@ -1,8 +1,8 @@
 // The Production Scheduler's capacity, as SnapQuote shows it. Mirrors src/quoting/exchange.ts.
-export interface FacilityCapacity { code: string; name: string; hoursPerWeek: number; lateHours: number; nextSixWeeksHours: number; load: number | null; caughtUpWeek: number | null }
+export interface FacilityCapacity { code: string; name: string; efficiency: number; hoursPerWeek: number; lateHours: number; nextSixWeeksHours: number; load: number | null; caughtUpWeek: number | null }
 export interface CapacityFile { writtenAt: string; horizonWeeks: number; basis: string; departments: { key: string; label: string; asOf: string; scheduleName: string; facilities: FacilityCapacity[] }[] }
 export type CapacityRead = { connected: false } | { connected: true; file: CapacityFile | null; problem: string | null; readAt: string };
-export interface WorkCellCapacity { facilities: FacilityCapacity[]; unknown: string[]; hoursPerWeek: number; lateHours: number; nextSixWeeksHours: number; load: number | null; caughtUpWeek: number | null }
+export interface WorkCellCapacity { facilities: FacilityCapacity[]; efficiency: number; unknown: string[]; hoursPerWeek: number; lateHours: number; nextSixWeeksHours: number; load: number | null; caughtUpWeek: number | null }
 export interface Mapping { workCell: string; facilities: string[]; setByName: string; setAt: string }
 
 export function metalsFacilities(read: CapacityRead | undefined | null): FacilityCapacity[] {
@@ -16,8 +16,9 @@ export function workCellCapacity(read: CapacityRead | undefined | null, codes: r
   const sum = (k: 'hoursPerWeek' | 'lateHours' | 'nextSixWeeksHours') => Math.round(facilities.reduce((s, f) => s + f[k], 0) * 100) / 100;
   const hoursPerWeek = sum('hoursPerWeek');
   const weeks = facilities.map((f) => f.caughtUpWeek);
+  const efficiency = facilities.length ? facilities.reduce((s, f) => s + f.efficiency, 0) / facilities.length : 1;
   return {
-    facilities, unknown: codes.filter((c) => !all.some((f) => f.code === c)), hoursPerWeek, lateHours: sum('lateHours'), nextSixWeeksHours: sum('nextSixWeeksHours'),
+    facilities, efficiency, unknown: codes.filter((c) => !all.some((f) => f.code === c)), hoursPerWeek, lateHours: sum('lateHours'), nextSixWeeksHours: sum('nextSixWeeksHours'),
     load: hoursPerWeek > 0 ? (sum('lateHours') + sum('nextSixWeeksHours')) / (hoursPerWeek * 6) : null,
     caughtUpWeek: facilities.length === 0 || weeks.some((w) => w === null) ? null : Math.max(...(weeks as number[])),
   };

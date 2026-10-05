@@ -106,6 +106,8 @@ export function quotesFile(writtenAt: string, quotes: ExchangeQuote[]): QuotesFi
 export interface FacilityCapacity {
   code: string;
   name: string;
+  /** Standard hours per clock hour on the facility (0.85 in Metals). The scheduler's hours are clock hours. */
+  efficiency: number;
   hoursPerWeek: number;
   lateHours: number;
   /** Hours due in the next six weeks. */
@@ -139,7 +141,7 @@ export function readCapacityFile(raw: unknown): { file: CapacityFile } | { probl
   for (const d of f.departments) {
     if (typeof d?.key !== 'string' || !Array.isArray(d.facilities)) return { problem: 'The capacity file is incomplete.' };
     for (const x of d.facilities) {
-      if (typeof x?.code !== 'string' || !isNum(x.hoursPerWeek) || !isNum(x.lateHours) || !isNum(x.nextSixWeeksHours)) return { problem: `Facility ${String(x?.code)} in the capacity file is incomplete.` };
+      if (typeof x?.code !== 'string' || !isNum(x.efficiency) || x.efficiency <= 0 || !isNum(x.hoursPerWeek) || !isNum(x.lateHours) || !isNum(x.nextSixWeeksHours)) return { problem: `Facility ${String(x?.code)} in the capacity file is incomplete.` };
     }
   }
   return { file: f as CapacityFile };
@@ -147,6 +149,8 @@ export function readCapacityFile(raw: unknown): { file: CapacityFile } | { probl
 
 export interface WorkCellCapacity {
   facilities: FacilityCapacity[];
+  /** The facilities' efficiency, averaged: a quote's standard hours ÷ this are hours of the work cell's clock. */
+  efficiency: number;
   /** Facility codes tied to the work cell that the scheduler does not report. */
   unknown: string[];
   hoursPerWeek: number;
@@ -166,8 +170,9 @@ export function workCellCapacity(file: CapacityFile, department: string, codes: 
   const lateHours = r2(facilities.reduce((s, f) => s + f.lateHours, 0));
   const nextSixWeeksHours = r2(facilities.reduce((s, f) => s + f.nextSixWeeksHours, 0));
   const weeks = facilities.map((f) => f.caughtUpWeek);
+  const efficiency = facilities.length ? facilities.reduce((s, f) => s + f.efficiency, 0) / facilities.length : 1;
   return {
-    facilities, unknown, hoursPerWeek, lateHours, nextSixWeeksHours,
+    facilities, unknown, efficiency: Math.round(efficiency * 1000) / 1000, hoursPerWeek, lateHours, nextSixWeeksHours,
     load: hoursPerWeek > 0 ? r2((lateHours + nextSixWeeksHours) / (hoursPerWeek * 6)) : null,
     caughtUpWeek: facilities.length === 0 || weeks.some((w) => w === null) ? null : Math.max(...(weeks as number[])),
   };
