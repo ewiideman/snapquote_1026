@@ -126,7 +126,7 @@ export function quotePdf(d: QuoteDetail, opts: PdfOptions): Promise<Buffer> {
   ensure(60);
   y += 12;
   if (d.sheet.leadTimeWeeks !== null) {
-    doc.font('Helvetica').fontSize(10).fillColor(ink).text(`Lead time: ${qty(d.sheet.leadTimeWeeks)} weeks after receipt of order${oneTime.length ? ' and tooling approval' : ''}.`, left, y, { width });
+    doc.font('Helvetica').fontSize(10).fillColor(ink).text(`Lead time: ${qty(d.sheet.leadTimeWeeks)} weeks after receipt of order.`, left, y, { width });
     y = doc.y + 6;
   }
   if (opts.terms.trim()) {

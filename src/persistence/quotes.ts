@@ -656,7 +656,7 @@ export async function reviseQuote(db: Database, actor: Account, quoteId: number,
   });
 }
 
-export const LOST_REASONS = ['Price', 'Lead time', 'Went with another supplier', 'Customer cancelled the project', 'No response from the customer', 'Other'] as const;
+export const LOST_REASONS = ['Price', 'Lead time', 'Went with another supplier', 'Customer canceled the project', 'No response from the customer', 'Other'] as const;
 
 export async function closeQuote(db: Database, actor: Account, quoteId: number, input: { outcome?: unknown; reason?: unknown; poNumber?: unknown; awardAmount?: unknown }): Promise<void> {
   requireSeller(actor);
