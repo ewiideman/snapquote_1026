@@ -9,9 +9,11 @@ Read README.md first. This file is the rules and where things stand.
   Metals calculator, Procurement vendor quotes, manual prices for every department, business
   development's own prices with a reason, review and send, the customer's PDF, won/lost/no bid,
   revisions, accounts and Metals rates under Settings.
-- State (2026-10-05, scheduler link): **SnapQuote and the Production Scheduler exchange files** in
-  `MACK_EXCHANGE_DIR` on Mack's server (Eric Wiideman, Oct 5: file drop first; quotes into the
-  scheduler first; Chris Glaski ties work cells to XA facilities). `src/quoting/exchange.ts` (pure:
+- State (2026-10-05, scheduler link): **SnapQuote's side of a file exchange with the Production
+  Scheduler is built; the scheduler's side is not** (Eric Wiideman, Oct 5: file drop, quotes into the
+  scheduler first, Chris Glaski ties work cells to XA facilities; then "keep the production scheduler
+  separate for now" -- do not change that repository from SnapQuote work). Format and status:
+  `docs/scheduler-exchange.md`. Files in `MACK_EXCHANGE_DIR` on Mack's server. `src/quoting/exchange.ts` (pure:
   formats `mack.snapquote.quotes` / `mack.scheduler.capacity` v1, `metalsHours` = setup once + run
   minutes × pieces ÷ 60, standard hours; compared with the scheduler's clock hours only after ÷ the facility's `efficiency` from capacity.json; `workCellCapacity` adds a work cell's
   facilities), `src/persistence/exchange.ts` (writes `snapquote/quotes.json` atomically: estimating,
@@ -20,8 +22,8 @@ Read README.md first. This file is the rules and where things stand.
   `{}` = not a scheduled facility) and `quote.ordered_quantity`. Screens: Work cells (Metals
   estimators, managers, administrators), plant load in the calculator, "Can the plant make it?" on
   review, link status under Settings. Hours come only from calculator estimates; parts priced by hand
-  or by departments without a calculator are listed as without hours. Same format is documented in the
-  scheduler's `docs/18-snapquote-exchange.md`; change both together.
+  or by departments without a calculator are listed as without hours. Until the scheduler writes
+  `capacity.json`, SnapQuote shows hours without load and the Work cells page takes typed codes.
 - **On-prem only. Period.** The app, PostgreSQL and attached files run on Mack's server. No cloud
   service, no outside API, no CDN at run time. Libraries are npm packages bundled at build.
 - **American English** everywhere: code, comments, screens, docs.

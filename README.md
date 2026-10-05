@@ -29,14 +29,15 @@ It calls no outside service.
 
 ## The link to the Production Scheduler
 
-Both apps run on Mack's server and share one folder, `MACK_EXCHANGE_DIR`. Neither reads the other's
-database.
+SnapQuote's side is built; the scheduler's is not yet, and the scheduler is being kept separate for
+now (`docs/scheduler-exchange.md`). Both apps run on Mack's server and are to share one folder,
+`MACK_EXCHANGE_DIR`. Neither reads the other's database.
 
 - **SnapQuote → scheduler:** every 10 minutes, and at once when a quote is won, SnapQuote writes
   `snapquote/quotes.json`. It holds quotes with the departments, with the customer, and won in the
   last 90 days, and for each Metals part priced with the calculator, the standard hours per work cell
-  at each quantity. The scheduler shows them beside its schedule as quoted work, never added to it.
-- **Scheduler → SnapQuote:** the scheduler writes `scheduler/capacity.json`: each XA facility's hours
+  at each quantity, for the scheduler to show beside its schedule as quoted work, never added to it.
+- **Scheduler → SnapQuote:** once built, the scheduler writes `scheduler/capacity.json`: each XA facility's hours
   a week, late work, the next six weeks and the week it is caught up. SnapQuote shows it in the Metals
   calculator and under "Can the plant make it?" on the review page.
 - **Work cells:** the rate sheet's work cells are tied to XA facilities by Chris Glaski on the Work
