@@ -18,6 +18,8 @@ export interface AppConfig {
   sessionHours: number;
   /** STORAGE_DIR: where attached files are kept. ./storage by default. */
   storageDir: string;
+  /** MACK_EXCHANGE_DIR: the folder SnapQuote and the Production Scheduler exchange files in; null, no exchange. */
+  exchangeDir: string | null;
 }
 
 export function loadDotEnv(file = join(PROJECT_ROOT, '.env')): Record<string, string> {
@@ -54,5 +56,6 @@ export function loadConfig(overrides: { databaseUrlVar?: string } = {}): AppConf
     port: Number(env['PORT'] ?? 3200),
     sessionHours: sessionHoursFrom(env['SESSION_HOURS']),
     storageDir: isAbsolute(storage) ? storage : join(PROJECT_ROOT, storage),
+    exchangeDir: env['MACK_EXCHANGE_DIR']?.trim() || null,
   };
 }

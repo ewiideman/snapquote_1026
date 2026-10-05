@@ -147,12 +147,38 @@ function RateInput({ value, onSave, prefix }: { value: number | null; onSave: (v
   );
 }
 
+interface SchedulerStatus { capacity: { connected: boolean; file?: { writtenAt: string } | null; problem?: string | null }; exchange: { dir: string; lastWrittenAt: string | null; quotes: number | null; error: string | null } | null }
+
+function SchedulerLink() {
+  const app = useApp();
+  const { data, reload } = useAsync(() => get<SchedulerStatus>('/scheduler'), []);
+  const [error, setError] = useState<unknown>(null);
+  if (!data) return null;
+  const x = data.exchange;
+  return (
+    <div className="section">
+      <header><h2>Production Scheduler</h2>{x && <button className="btn small" onClick={async () => { setError(null); try { await post('/scheduler/write'); reload(); app.toast('Quotes written for the scheduler.'); } catch (err) { setError(err); } }}>Write quotes now</button>}</header>
+      <div className="body stack" style={{ gap: 6 }}>
+        {!x ? <span>Not linked: set MACK_EXCHANGE_DIR on this server to the folder the scheduler also uses.</span> : (
+          <>
+            <span>Folder: <span className="mono">{x.dir}</span></span>
+            <span>Quotes for the scheduler: {x.error ? <b style={{ color: 'var(--late)' }}>{x.error}</b> : x.lastWrittenAt ? `${x.quotes} written ${ago(x.lastWrittenAt)}` : 'not written yet'}</span>
+            <span>Capacity from the scheduler: {data.capacity.file ? `written ${ago(data.capacity.file.writtenAt)}` : <b style={{ color: 'var(--soon)' }}>{data.capacity.problem}</b>}</span>
+          </>
+        )}
+        <ErrorBanner error={error} />
+      </div>
+    </div>
+  );
+}
+
 export function Settings() {
   return (
     <div className="page narrow stack" style={{ gap: 16 }}>
       <h1>Settings</h1>
       <Accounts />
       <Terms />
+      <SchedulerLink />
       <MetalsRates />
     </div>
   );

@@ -11,6 +11,7 @@ import { Queue } from './pages/Queue.tsx';
 import { QuotePage } from './pages/Quote.tsx';
 import { SendPage } from './pages/Send.tsx';
 import { Settings } from './pages/Settings.tsx';
+import { WorkCells } from './pages/WorkCells.tsx';
 
 function Brand() {
   return (
@@ -72,6 +73,7 @@ function App() {
   if (quoteMatch) page = quoteMatch[2] ? <SendPage id={Number(quoteMatch[1])} /> : <QuotePage id={Number(quoteMatch[1])} />;
   else if (path === '/queue' || (path === '/' && !seller)) page = <Queue department={route.query.get('department')} />;
   else if (path === '/settings') page = <Settings />;
+  else if (path === '/work-cells') page = <WorkCells />;
   else if (path === '/account') page = <ChangePassword onDone={() => { state.toast('Your password is changed.'); location.hash = '#/'; }} />;
   else page = <Board />;
 
@@ -85,6 +87,7 @@ function App() {
             : <a className={on('/') || on('/queue')} href="#/queue">My queue{counts.queue > 0 && <span className="count">{counts.queue}</span>}</a>}
           {seller && account.role !== 'sales' && <a className={on('/queue')} href="#/queue">Department queues</a>}
           {!seller && <a className={on('/board')} href="#/board">All quotes</a>}
+          {((account.role === 'estimator' && account.department === 'metals') || account.role === 'manager' || account.role === 'administrator') && <a className={on('/work-cells')} href="#/work-cells">Work cells</a>}
           {account.role === 'administrator' && <a className={on('/settings')} href="#/settings">Settings</a>}
         </nav>
         <div className="who">

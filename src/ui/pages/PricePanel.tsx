@@ -6,6 +6,7 @@ import { useAsync } from '../lib/useAsync.ts';
 import type { Line, QuoteDetail } from '../lib/types.ts';
 import { canEstimate, ErrorBanner, NumberInput, Panel, useApp } from '../components/ui.tsx';
 import { ago, qty, usd } from '../lib/format.ts';
+import { caughtUpWords, loadTone, pct, workCellCapacity, type CapacityRead, type Mapping } from '../lib/capacity.ts';
 
 type Tab = 'calculator' | 'vendors' | 'manual';
 
@@ -304,6 +305,14 @@ function MetalsBreakdown({ breaks, warnings }: { breaks: any[]; warnings: string
 
 function MetalsCalculator({ line, onSaved }: { line: Line; onSaved: () => void }) {
   const catalog = useAsync(() => get<{ catalog: { workCells: WorkCell[]; materialItems: MaterialItem[] } }>('/metals/catalog'), []);
+  // The Production Scheduler's load on each work cell, when the work cell is tied to XA facilities.
+  const plant = useAsync(() => get<{ capacity: CapacityRead; workCells: { name: string; mapping: Mapping | null }[] }>('/metals/facilities'), []);
+  const loadOf = (cell: string) => {
+    const codes = plant.data?.workCells.find((w) => w.name === cell)?.mapping?.facilities;
+    const c = codes && codes.length ? workCellCapacity(plant.data?.capacity, codes) : null;
+    const read = plant.data?.capacity;
+    return c && read && read.connected && read.file ? { c, words: caughtUpWords(c, read.file.horizonWeeks) } : null;
+  };
   const prior = line.estimate?.basis === 'calculator' ? line.estimate : null;
   const [s, setS] = useState<CalcState>(() => fromInputs(prior?.inputs));
   const [lead, setLead] = useState<number | null>(prior?.leadTimeWeeks ?? null);
@@ -363,7 +372,7 @@ function MetalsCalculator({ line, onSaved }: { line: Line; onSaved: () => void }
       <div className="card pad stack">
         <b>Operations</b>
         <table className="grid edit ops">
-          <thead><tr><th>Work cell</th><th className="right">Setup (hours)</th><th className="right">Run (min / piece)</th><th className="right">Rate</th><th /></tr></thead>
+          <thead><tr><th>Work cell</th><th className="right">Setup (hours)</th><th className="right">Run (min / piece)</th><th className="right">Rate</th><th>Plant load</th><th /></tr></thead>
           <tbody>
             {s.ops.map((o, i) => {
               const cell = cells.find((c) => c.name === o.workCell);
@@ -377,6 +386,10 @@ function MetalsCalculator({ line, onSaved }: { line: Line; onSaved: () => void }
                   <td className="tight"><NumberInput className="bare" style={{ width: 90 }} value={o.setupHours} onChange={(v) => upd({ setupHours: v })} /></td>
                   <td className="tight"><NumberInput className="bare" style={{ width: 90 }} value={o.runMinutesPerPiece} onChange={(v) => upd({ runMinutesPerPiece: v })} /></td>
                   <td className="tight right muted">{cell ? `${usd(cell.hourlyCellRate, 2)}/h` : ''}</td>
+                  <td className="tight small">{(() => {
+                    const l = o.workCell ? loadOf(o.workCell) : null;
+                    return l ? <span title={`${l.c.facilities.map((f) => f.code).join(', ')}: ${qty(l.c.hoursPerWeek)} h a week`}><span className={`chip ${loadTone(l.c.load) === 'ok' ? '' : loadTone(l.c.load)}`}>{pct(l.c.load)}</span> {l.words}</span> : '';
+                  })()}</td>
                   <td className="tight"><button className="closex" onClick={() => set({ ops: s.ops.filter((_, j) => j !== i) })}>×</button></td>
                 </tr>
               );

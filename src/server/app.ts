@@ -20,6 +20,9 @@ import { quoteTerms, referenceRows, setReference } from '../persistence/referenc
 import { quotePdf } from '../quoting/pdf.ts';
 import { DEPARTMENTS, isDepartment } from '../quoting/departments.ts';
 import { metalsRoutes } from './metalsRoutes.ts';
+import type { ExchangeTimer } from './exchangeTimer.ts';
+import { facilityMap, quoteCapacity, readCapacity, setFacilities } from '../persistence/exchange.ts';
+import { referenceRows as metalsReference } from '../persistence/reference.ts';
 
 const UI_ROOT = join(PROJECT_ROOT, 'dist', 'ui');
 
@@ -34,6 +37,9 @@ const id = (req: Request, name = 'id'): number => {
 export interface AppOptions {
   sessionHours?: number;
   storageDir: string;
+  /** MACK_EXCHANGE_DIR, the folder shared with the Production Scheduler; null when there is no link. */
+  exchangeDir?: string | null;
+  exchange?: ExchangeTimer;
 }
 
 const PUBLIC = new Set(['GET /health', 'GET /session', 'POST /session']);
@@ -45,6 +51,7 @@ const LOCK_WINDOW_MS = 15 * 60_000;
 export function createApp(db: Database, options: AppOptions): express.Express {
   const sessionHours = options.sessionHours ?? 168;
   const storageDir = options.storageDir;
+  const exchangeDir = options.exchangeDir ?? null;
   const failures = new Map<string, { count: number; first: number }>();
   const app = express();
   app.disable('x-powered-by');
@@ -201,7 +208,8 @@ export function createApp(db: Database, options: AppOptions): express.Express {
   });
   api.post('/quotes/:id/close', async (req, res) => {
     const b = body(req);
-    await closeQuote(db, me(res), id(req), { outcome: b['outcome'], reason: b['reason'], poNumber: b['poNumber'], awardAmount: b['awardAmount'] });
+    await closeQuote(db, me(res), id(req), { outcome: b['outcome'], reason: b['reason'], poNumber: b['poNumber'], awardAmount: b['awardAmount'], orderedQuantity: b['orderedQuantity'] });
+    void options.exchange?.writeNow(); // a win is news for the scheduler: tell it now, not in ten minutes
     res.json(await quoteDetail(db, id(req)));
   });
   api.get('/quotes/:id/pdf', async (req, res) => {
@@ -245,6 +253,32 @@ export function createApp(db: Database, options: AppOptions): express.Express {
 
   // ---- metals calculator
   metalsRoutes(api, db, me);
+
+  // ---- the Production Scheduler
+  api.get('/scheduler', (_req, res) => {
+    res.json({ capacity: readCapacity(exchangeDir), exchange: options.exchange?.status() ?? null });
+  });
+  api.post('/scheduler/write', async (_req, res) => {
+    requireAdministrator(res);
+    if (!options.exchange) throw new HttpError(409, 'MACK_EXCHANGE_DIR is not set on this server.');
+    res.json(await options.exchange.writeNow());
+  });
+  api.get('/quotes/:id/capacity', async (req, res) => {
+    res.json(await quoteCapacity(db, id(req), exchangeDir));
+  });
+  // Metals work cells and the XA facilities Chris Glaski ties them to.
+  api.get('/metals/facilities', async (_req, res) => {
+    const order = (r: { data: unknown }) => (r.data as { sortOrder?: number }).sortOrder ?? 0;
+    const cells = (await metalsReference(db, 'metals', 'work_cell')).filter((r) => r.active).sort((a, b) => order(a) - order(b));
+    const map = await facilityMap(db);
+    res.json({ capacity: readCapacity(exchangeDir), workCells: cells.map((c) => ({ name: c.key, mapping: map.get(c.key) ?? null })) });
+  });
+  api.put('/metals/facilities', async (req, res) => {
+    const b = body(req);
+    if (typeof b['workCell'] !== 'string') throw new HttpError(400, 'workCell is required');
+    await setFacilities(db, me(res), b['workCell'], b['facilities'] === undefined ? null : b['facilities']);
+    res.json({ ok: true });
+  });
 
   // ---- files
   api.post('/quotes/:id/files', express.raw({ type: 'application/octet-stream', limit: MAX_FILE_BYTES }), async (req, res) => {

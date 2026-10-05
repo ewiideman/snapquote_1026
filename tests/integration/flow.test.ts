@@ -12,10 +12,13 @@ import { seedReference } from '../../src/persistence/reference.ts';
 import { REFERENCE_SEED } from '../../src/pricing/seed.ts';
 import { createAccount } from '../../src/persistence/accounts.ts';
 import { createApp } from '../../src/server/app.ts';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { writeQuotesFile } from '../../src/persistence/exchange.ts';
 
 let db: Database;
 let server: Server;
 let base = '';
+const exchangeDir = mkdtempSync(join(tmpdir(), 'sq-exchange-'));
 
 before(async () => {
   const config = loadConfig({ databaseUrlVar: 'TEST_DATABASE_URL' });
@@ -29,7 +32,7 @@ before(async () => {
   await createAccount(db, null, { id: 'jon.whitney', displayName: 'Jon Whitney', role: 'sales', email: 'jon.whitney@mack.com', password: pw, temporary: false });
   await createAccount(db, null, { id: 'metals.est', displayName: 'Metals Estimator', role: 'estimator', department: 'metals', password: pw, temporary: false });
   await createAccount(db, null, { id: 'buyer', displayName: 'Procurement Buyer', role: 'estimator', department: 'procurement', password: pw, temporary: false });
-  server = createApp(db, { storageDir: mkdtempSync(join(tmpdir(), 'sq-files-')) }).listen(0);
+  server = createApp(db, { storageDir: mkdtempSync(join(tmpdir(), 'sq-files-')), exchangeDir }).listen(0);
   await new Promise((r) => server.once('listening', r));
   const addr = server.address();
   base = `http://127.0.0.1:${typeof addr === 'object' && addr ? addr.port : 0}/api`;
@@ -184,6 +187,30 @@ test('a quote from RFQ email to won', async () => {
   assert.equal((await metals('POST', `/lines/${bracket.id}/metals`, { input: calcInput, save: true, leadTimeWeeks: 4 })).status, 200);
   assert.equal((await metals('POST', `/quotes/${qid}/requests/metals/answer`, {})).status, 200);
 
+  // The link to the Production Scheduler: Chris ties the work cells, the scheduler's capacity shows beside the quote.
+  const [cellA, cellB] = calcInput.operations.map((o) => o.workCell) as [string, string];
+  assert.equal((await jon('PUT', '/metals/facilities', { workCell: cellA, facilities: ['7/L72'] })).status, 403, 'business development does not tie work cells');
+  assert.equal((await metals('PUT', '/metals/facilities', { workCell: cellA, facilities: ['7/L72'] })).status, 200);
+  assert.equal((await metals('PUT', '/metals/facilities', { workCell: 'No such cell', facilities: [] })).status, 404);
+  let cap = (await jon('GET', `/quotes/${qid}/capacity`)).body;
+  assert.equal(cap.read.connected, true);
+  assert.match(cap.read.problem, /not written its capacity file/);
+  mkdirSync(join(exchangeDir, 'scheduler'), { recursive: true });
+  writeFileSync(join(exchangeDir, 'scheduler', 'capacity.json'), JSON.stringify({
+    format: 'mack.scheduler.capacity', version: 1, writtenAt: new Date().toISOString(), horizonWeeks: 12, basis: 'test',
+    departments: [{ key: 'metals', label: 'Metals', asOf: new Date().toISOString(), scheduleName: 'Metals', facilities: [
+      { code: '7/L72', name: 'FIBER LASER L72', hoursPerWeek: 120, lateHours: 30, nextSixWeeksHours: 600, load: 0.88, caughtUpWeek: 1 },
+    ] }],
+  }));
+  cap = (await jon('GET', `/quotes/${qid}/capacity`)).body;
+  const rowA = cap.rows.find((r: any) => r.workCell === cellA);
+  const rowB = cap.rows.find((r: any) => r.workCell === cellB);
+  // Three per assembly: 300 and 1,500 pieces. Setup 0.25 h once, 0.8 min a piece.
+  assert.deepEqual(rowA.hours, [4.25, 20.25]);
+  assert.equal(rowA.capacity.hoursPerWeek, 120);
+  assert.equal(rowB.facilities, null, 'not tied yet');
+  assert.equal(rowB.capacity, null);
+
   // The customer's copy, then sent, then won.
   const pdf = await jon('GET', `/quotes/${qid}/pdf`);
   assert.equal(pdf.status, 200);
@@ -191,12 +218,29 @@ test('a quote from RFQ email to won', async () => {
   assert.equal((pdf.body as Buffer).subarray(0, 5).toString(), '%PDF-');
   assert.equal((await jon('POST', `/quotes/${qid}/close`, { outcome: 'won' })).status, 409, 'cannot win an unsent quote');
   assert.equal((await jon('POST', `/quotes/${qid}/sent`, {})).body.quote.status, 'sent');
-  q = (await jon('POST', `/quotes/${qid}/close`, { outcome: 'won', poNumber: 'PO-123', awardAmount: 25000 })).body;
+  assert.equal((await jon('POST', `/quotes/${qid}/close`, { outcome: 'won', orderedQuantity: 250 })).status, 400, 'ordered quantity must be one quoted');
+  q = (await jon('POST', `/quotes/${qid}/close`, { outcome: 'won', poNumber: 'PO-123', awardAmount: 25000, orderedQuantity: 500 })).body;
   assert.equal(q.quote.status, 'won');
+  assert.equal(q.quote.orderedQuantity, 500);
   assert.equal(q.quote.poNumber, 'PO-123');
   const card = (await jon('GET', '/board')).body.find((c: any) => c.id === qid);
   assert.equal(card.stage, 'won');
   assert.equal(card.awardAmount, 25000);
+
+  // What the scheduler is told: the won quote, its ordered quantity, hours per work cell and facility.
+  await writeQuotesFile(db, exchangeDir);
+  const out = JSON.parse(readFileSync(join(exchangeDir, 'snapquote', 'quotes.json'), 'utf8'));
+  assert.equal(out.format, 'mack.snapquote.quotes');
+  const won = out.quotes.find((x: any) => x.number === q.quote.number);
+  assert.equal(won.status, 'won');
+  assert.equal(won.orderedQuantity, 500);
+  assert.deepEqual(won.quantities, [100, 500]);
+  const laser = won.work.find((w: any) => w.workCell === cellA);
+  assert.deepEqual(laser.facilities, ['7/L72']);
+  assert.deepEqual(laser.pieces, [300, 1500]);
+  assert.deepEqual(laser.hours, [4.25, 20.25]);
+  assert.equal(won.work.find((w: any) => w.workCell === cellB).facilities, null);
+  assert.ok(out.quotes.every((x: any) => x.status !== 'draft'), 'drafts are not news for the plant');
 });
 
 test('signed out, nothing but the session is reachable', async () => {

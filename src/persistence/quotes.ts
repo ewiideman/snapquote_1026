@@ -47,6 +47,7 @@ export interface QuoteHeader {
   closeReason: string | null;
   poNumber: string | null;
   awardAmount: number | null;
+  orderedQuantity: number | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -115,7 +116,7 @@ type QuoteRow = {
   id: number; number: string; revision: number; customer_id: number | null; customer_name: string | null; title: string; contact_name: string | null; contact_email: string | null;
   rfq_received_on: string | null; customer_due_on: string | null; owner_id: string; owner_name: string; quantities: number[]; itar: boolean; notes: string; status: QuoteStatus;
   source_email: { subject: string; from: string; date: string | null } | null; sent_at: string | null; closed_at: string | null; close_reason: string | null; po_number: string | null;
-  award_amount: string | null; created_at: string; updated_at: string;
+  award_amount: string | null; ordered_quantity: number | null; created_at: string; updated_at: string;
 };
 
 const QUOTE_SELECT = `SELECT q.*, c.name AS customer_name, u.display_name AS owner_name
@@ -125,7 +126,7 @@ const toHeader = (r: QuoteRow): QuoteHeader => ({
   id: r.id, number: r.number, revision: r.revision, customerId: r.customer_id, customerName: r.customer_name, title: r.title, contactName: r.contact_name, contactEmail: r.contact_email,
   rfqReceivedOn: r.rfq_received_on, customerDueOn: r.customer_due_on, ownerId: r.owner_id, ownerName: r.owner_name, quantities: r.quantities.map(Number), itar: r.itar, notes: r.notes,
   status: r.status, sourceEmail: r.source_email, sentAt: r.sent_at, closedAt: r.closed_at, closeReason: r.close_reason, poNumber: r.po_number, awardAmount: numOrNull(r.award_amount),
-  createdAt: r.created_at, updatedAt: r.updated_at,
+  orderedQuantity: r.ordered_quantity, createdAt: r.created_at, updatedAt: r.updated_at,
 });
 
 async function header(db: Queryable, id: number, lock = false): Promise<QuoteHeader> {
@@ -650,7 +651,7 @@ export async function reviseQuote(db: Database, actor: Account, quoteId: number,
   await db.transaction(async (tx) => {
     const q = await header(tx, quoteId, true);
     if (q.status === 'draft' || q.status === 'estimating') throw new HttpError(409, 'This quote can still be changed as it is.');
-    await tx.query("UPDATE quote.quote SET status = 'estimating', revision = revision + 1, sent_at = NULL, closed_at = NULL, close_reason = NULL, po_number = NULL, award_amount = NULL, updated_at = now() WHERE id = $1", [quoteId]);
+    await tx.query("UPDATE quote.quote SET status = 'estimating', revision = revision + 1, sent_at = NULL, closed_at = NULL, close_reason = NULL, po_number = NULL, award_amount = NULL, ordered_quantity = NULL, updated_at = now() WHERE id = $1", [quoteId]);
     await event(tx, quoteId, actor.id, `${actor.displayName} opened revision ${q.revision + 1}${reason ? `: ${reason}` : '.'}`);
     await audit(tx, actor.id, 'quote.revised', 'quote', quoteId, { revision: q.revision + 1, reason });
   });
@@ -658,7 +659,7 @@ export async function reviseQuote(db: Database, actor: Account, quoteId: number,
 
 export const LOST_REASONS = ['Price', 'Lead time', 'Went with another supplier', 'Customer canceled the project', 'No response from the customer', 'Other'] as const;
 
-export async function closeQuote(db: Database, actor: Account, quoteId: number, input: { outcome?: unknown; reason?: unknown; poNumber?: unknown; awardAmount?: unknown }): Promise<void> {
+export async function closeQuote(db: Database, actor: Account, quoteId: number, input: { outcome?: unknown; reason?: unknown; poNumber?: unknown; awardAmount?: unknown; orderedQuantity?: unknown }): Promise<void> {
   requireSeller(actor);
   const outcome = input.outcome;
   if (outcome !== 'won' && outcome !== 'lost' && outcome !== 'no_bid') throw new HttpError(400, 'outcome must be won, lost or no_bid');
@@ -670,8 +671,10 @@ export async function closeQuote(db: Database, actor: Account, quoteId: number, 
     const q = await header(tx, quoteId, true);
     requireOpen(q);
     if (outcome === 'won' && q.status !== 'sent') throw new HttpError(409, 'Only a quote the customer has can be won.');
-    await tx.query('UPDATE quote.quote SET status = $2, closed_at = now(), close_reason = $3, po_number = $4, award_amount = $5, updated_at = now() WHERE id = $1',
-      [quoteId, outcome, reason, outcome === 'won' ? optText(input.poNumber, 100) : null, outcome === 'won' ? award : null]);
+    const ordered = outcome !== 'won' || input.orderedQuantity === undefined || input.orderedQuantity === null || input.orderedQuantity === '' ? null : Number(input.orderedQuantity);
+    if (ordered !== null && !q.quantities.includes(ordered)) throw new HttpError(400, 'The quantity ordered is one of the quantities quoted.');
+    await tx.query('UPDATE quote.quote SET status = $2, closed_at = now(), close_reason = $3, po_number = $4, award_amount = $5, ordered_quantity = $6, updated_at = now() WHERE id = $1',
+      [quoteId, outcome, reason, outcome === 'won' ? optText(input.poNumber, 100) : null, outcome === 'won' ? award : null, ordered]);
     if (q.status === 'estimating') await tx.query("UPDATE quote.request SET status = 'withdrawn' WHERE quote_id = $1 AND status IN ('open', 'question')", [quoteId]);
     const words = outcome === 'won' ? 'Won' : outcome === 'lost' ? 'Lost' : 'No bid';
     await event(tx, quoteId, actor.id, `${words}${reason ? `: ${reason}` : ''}${outcome === 'won' && input.poNumber ? ` (PO ${String(input.poNumber).trim()})` : ''}.`);

@@ -44,7 +44,7 @@ export interface QuoteHeader {
   id: number; number: string; revision: number; customerId: number | null; customerName: string | null; title: string; contactName: string | null; contactEmail: string | null;
   rfqReceivedOn: string | null; customerDueOn: string | null; ownerId: string; ownerName: string; quantities: number[]; itar: boolean; notes: string;
   status: 'draft' | 'estimating' | 'sent' | 'won' | 'lost' | 'no_bid'; sourceEmail: { subject: string; from: string; date: string | null } | null;
-  sentAt: string | null; closedAt: string | null; closeReason: string | null; poNumber: string | null; awardAmount: number | null; createdAt: string; updatedAt: string;
+  sentAt: string | null; closedAt: string | null; closeReason: string | null; poNumber: string | null; awardAmount: number | null; orderedQuantity: number | null; createdAt: string; updatedAt: string;
 }
 
 export interface QuoteDetail {

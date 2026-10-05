@@ -8,6 +8,8 @@ import { STAGE_NAMES } from '../lib/types.ts';
 import { canSell, DeptChip, Dialog, ErrorBanner, NumberInput, useApp } from '../components/ui.tsx';
 import { qty, shortDate, usd } from '../lib/format.ts';
 import { CloseDialog } from './Quote.tsx';
+import { caughtUpWords, loadTone, pct, type CapacityRead, type WorkCellCapacity } from '../lib/capacity.ts';
+import { ago } from '../lib/format.ts';
 import { PricePanel } from './PricePanel.tsx';
 
 function PriceCell({ cell, editable, onEdit }: { cell: SheetCell; editable: boolean; onEdit: () => void }) {
@@ -54,6 +56,66 @@ function OverrideDialog({ line, cell, onClose, onDone }: { line: Line; cell: She
       <label className="field">Why (everyone on the quote sees this)<input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. Match the 2025 price; volume commitment" autoFocus /></label>
       <ErrorBanner error={error} />
     </Dialog>
+  );
+}
+
+interface QuoteCapacity {
+  read: CapacityRead;
+  quantities: number[];
+  rows: { workCell: string; partNumber: string | null; ownQuantities: number[] | null; facilities: string[] | null; hours: number[]; capacity: WorkCellCapacity | null }[];
+  withoutHours: { department: string; partNumber: string; reason: string }[];
+}
+
+/** Can the plant make it: this quote's Metals hours against the Production Scheduler's load on the same machines. */
+function PlantCapacity({ id, version }: { id: number; version: string }) {
+  const { data } = useAsync(() => get<QuoteCapacity>(`/quotes/${id}/capacity`), [id, version]);
+  if (!data || (data.rows.length === 0 && data.withoutHours.length === 0)) return null;
+  const read = data.read;
+  const file = read.connected ? read.file : null;
+  const metals = file?.departments.find((x) => x.key === 'metals');
+  return (
+    <div className="section" style={{ marginBottom: 16 }}>
+      <header>
+        <h2>Can the plant make it?</h2>
+        <span className="muted small">{metals ? `Metals load from the Production Scheduler (${metals.scheduleName}), written ${ago(file?.writtenAt ?? '')}` : ''}</span>
+      </header>
+      {!read.connected && <div className="body"><div className="banner info">This server is not linked to the Production Scheduler, so only the hours are shown.</div></div>}
+      {read.connected && !file && <div className="body"><div className="banner warn">{read.problem}</div></div>}
+      {data.rows.length > 0 && (
+        <table className="grid">
+          <thead>
+            <tr>
+              <th>Work cell</th>
+              {data.quantities.map((q) => <th key={q} className="right">Hours at {qty(q)}</th>)}
+              <th className="right">Its hours a week</th><th className="right">Load</th><th>Late work</th><th className="right">Biggest quantity is</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.rows.map((r) => {
+              const c = r.capacity;
+              const biggest = r.hours[r.hours.length - 1] ?? 0;
+              return (
+                <tr key={`${r.workCell}|${r.partNumber ?? ''}`}>
+                  <td><b>{r.workCell}</b>
+                    <div className="sub">{r.facilities === null ? 'not tied to an XA facility yet' : r.facilities.length === 0 ? 'not a scheduled facility' : r.facilities.join(', ')}{r.partNumber ? ` · ${r.partNumber} at its own quantities (${(r.ownQuantities ?? []).map(qty).join(', ')})` : ''}</div>
+                  </td>
+                  {r.ownQuantities ? <td colSpan={data.quantities.length} className="right">{r.hours.map((h) => qty(h)).join(' / ')}</td> : data.quantities.map((q, i) => <td key={q} className="right">{qty(r.hours[i] ?? 0)}</td>)}
+                  <td className="right">{c ? qty(c.hoursPerWeek) : ''}</td>
+                  <td className="right">{c ? <span className={`chip ${loadTone(c.load) === 'ok' ? '' : loadTone(c.load)}`}>{pct(c.load)}</span> : ''}</td>
+                  <td className="small">{c && file ? caughtUpWords(c, file.horizonWeeks) : ''}</td>
+                  <td className="right small">{c && c.hoursPerWeek > 0 ? `${qty(Math.round((biggest / c.hoursPerWeek) * 100) / 100)} wk of it` : ''}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      )}
+      <div className="body muted small stack" style={{ gap: 4 }}>
+        <span>Hours are standard hours from the Metals calculator: each operation's setup once, plus run time per piece. Load is late work plus the next six weeks, against six weeks of the schedule's hours. The quote is not in the schedule; it is shown beside it.</span>
+        {data.withoutHours.length > 0 && <span>No hours for {data.withoutHours.map((w) => `${w.partNumber} (${w.reason})`).join(', ')}.</span>}
+        {data.rows.some((r) => r.facilities === null) && <span>A work cell not tied to its XA facility yet can be tied under Work cells.</span>}
+      </div>
+    </div>
   );
 }
 
@@ -154,6 +216,8 @@ export function SendPage({ id }: { id: number }) {
           </table>
         )}
       </div>
+
+      <PlantCapacity id={id} version={d.quote.updatedAt} />
 
       {d.overrides.length > 0 && (
         <div className="section" style={{ marginBottom: 16 }}>

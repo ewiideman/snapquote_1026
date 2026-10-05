@@ -171,7 +171,9 @@ export function CloseDialog({ d, outcome, onClose, onDone }: { d: QuoteDetail; o
   const [reason, setReason] = useState('');
   const [other, setOther] = useState('');
   const [po, setPo] = useState('');
-  const [amount, setAmount] = useState(() => (d.sheet.assembly?.[0]?.extended ?? '').toString());
+  const [ordered, setOrdered] = useState<number | null>(d.quote.quantities.length === 1 ? d.quote.quantities[0] ?? null : null);
+  const orderValue = (q: number | null) => (q === null ? null : d.sheet.assembly?.find((b) => b.quantity === q)?.extended ?? null);
+  const [amount, setAmount] = useState(() => (orderValue(ordered) ?? '').toString());
   const [error, setError] = useState<unknown>(null);
   const finalReason = reason === 'Other' ? other : reason;
   return (
@@ -182,6 +184,14 @@ export function CloseDialog({ d, outcome, onClose, onDone }: { d: QuoteDetail; o
         <div className="body">
           {outcome === 'won' ? (
             <div className="grid2">
+              {d.quote.quantities.length > 0 && (
+                <label className="field" style={{ gridColumn: '1 / -1' }}>Quantity ordered — the Production Scheduler counts the work at this quantity
+                  <select value={ordered ?? ''} onChange={(e) => { const q = e.target.value ? Number(e.target.value) : null; setOrdered(q); const v = orderValue(q); if (v !== null) setAmount(String(v)); }}>
+                    <option value="">Not known yet</option>
+                    {d.quote.quantities.map((q) => <option key={q} value={q}>{q.toLocaleString('en-US')}</option>)}
+                  </select>
+                </label>
+              )}
               <label className="field">Customer PO number<input value={po} onChange={(e) => setPo(e.target.value)} autoFocus /></label>
               <label className="field">Order value ($)<input className="num" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} /></label>
             </div>
@@ -204,7 +214,7 @@ export function CloseDialog({ d, outcome, onClose, onDone }: { d: QuoteDetail; o
           <button className="btn" onClick={onClose}>Cancel</button>
           <button className="btn primary" disabled={outcome !== 'won' && !finalReason.trim()} onClick={async () => {
             try {
-              onDone(await post(`/quotes/${d.quote.id}/close`, { outcome, reason: finalReason || null, poNumber: po || null, awardAmount: amount === '' ? null : Number(amount.replace(/[$,]/g, '')) }));
+              onDone(await post(`/quotes/${d.quote.id}/close`, { outcome, reason: finalReason || null, poNumber: po || null, awardAmount: amount === '' ? null : Number(amount.replace(/[$,]/g, '')), orderedQuantity: ordered }));
             } catch (err) { setError(err); }
           }}>Record it</button>
         </footer>

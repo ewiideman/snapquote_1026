@@ -9,6 +9,19 @@ Read README.md first. This file is the rules and where things stand.
   Metals calculator, Procurement vendor quotes, manual prices for every department, business
   development's own prices with a reason, review and send, the customer's PDF, won/lost/no bid,
   revisions, accounts and Metals rates under Settings.
+- State (2026-10-05, scheduler link): **SnapQuote and the Production Scheduler exchange files** in
+  `MACK_EXCHANGE_DIR` on Mack's server (Eric Wiideman, Oct 5: file drop first; quotes into the
+  scheduler first; Chris Glaski ties work cells to XA facilities). `src/quoting/exchange.ts` (pure:
+  formats `mack.snapquote.quotes` / `mack.scheduler.capacity` v1, `metalsHours` = setup once + run
+  minutes × pieces ÷ 60, standard hours, no efficiency; `workCellCapacity` adds a work cell's
+  facilities), `src/persistence/exchange.ts` (writes `snapquote/quotes.json` atomically: estimating,
+  sent, won ≤ 90 days; reads `scheduler/capacity.json` by mtime), `src/server/exchangeTimer.ts` (every
+  10 min, at start, and on a win). Migration 0002: `pricing.work_cell_facility` (no row = not tied;
+  `{}` = not a scheduled facility) and `quote.ordered_quantity`. Screens: Work cells (Metals
+  estimators, managers, administrators), plant load in the calculator, "Can the plant make it?" on
+  review, link status under Settings. Hours come only from calculator estimates; parts priced by hand
+  or by departments without a calculator are listed as without hours. Same format is documented in the
+  scheduler's `docs/18-snapquote-exchange.md`; change both together.
 - **On-prem only. Period.** The app, PostgreSQL and attached files run on Mack's server. No cloud
   service, no outside API, no CDN at run time. Libraries are npm packages bundled at build.
 - **American English** everywhere: code, comments, screens, docs.
@@ -32,9 +45,8 @@ Read README.md first. This file is the rules and where things stand.
 - Ports: 3200 (3000/3003 are the old SnapQuote, 3100 the Production Scheduler, same server).
 - Open: ITAR quotes are flagged but visible to everyone signed in (who may see them is Mack's call);
   no approval step before sending (add only if Mack asks); the Molding (ADC), Machining and Assembly
-  calculators; importing customers and suppliers from the old SnapQuote; the link to the Production
-  Scheduler (capacity check while quoting; open quotes as its quoted-work layer, register B-10);
-  installing as a Windows service with NSSM like the scheduler (`docs/16` there).
+  calculators (their hours then reach the scheduler too); importing customers and suppliers from the
+  old SnapQuote; installing as a Windows service with NSSM like the scheduler (`docs/16` there).
 - Libraries: Express 5, `pg`, exceljs, pdfkit, mailparser, @kenjiuno/msgreader; React + Vite in
   `src/ui`. Node ≥ 22.18 runs TypeScript directly: erasable syntax only, `.ts` import extensions.
   Install with `npm ci --include=dev` (`NODE_ENV=production` may be set).
