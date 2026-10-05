@@ -31,3 +31,17 @@ test('picks the sheet whose header names the most columns', () => {
 test('says why nothing was taken', () => {
   assert.match(proposeLines([{ name: 'S', rows: [['a', 'b'], ['1', '2']] }]).problem ?? '', /No column headed part number or description/);
 });
+
+test('a Part Number column beats an Item (find number) column before it', () => {
+  const r = proposeLines([{ name: 'BOM', rows: [
+    ['Item', 'Part Number', 'Rev', 'Description', 'Qty Per'],
+    ['1', '100-4410', 'B', 'Mounting bracket, left', '2'],
+  ] }]);
+  assert.equal(r.lines[0]?.partNumber, '100-4410');
+});
+
+test('Item Number is a part number when nothing better is there; a bare Item only as a last resort', () => {
+  assert.equal(proposeLines([{ name: 'S', rows: [['Item Number', 'Description'], ['MMP008482', 'Bracket']] }]).lines[0]?.partNumber, 'MMP008482');
+  assert.equal(proposeLines([{ name: 'S', rows: [['Item', 'Description'], ['X-1', 'Cover']] }]).lines[0]?.partNumber, 'X-1');
+  assert.equal(proposeLines([{ name: 'S', rows: [['Item', 'Item No.', 'Description'], ['1', 'A-7', 'Cover']] }]).lines[0]?.partNumber, 'A-7');
+});

@@ -23,31 +23,35 @@ export interface BomResult {
 
 type Field = 'partNumber' | 'revision' | 'description' | 'qtyPer' | 'material' | 'notes' | 'level';
 
-const FIELD_PATTERNS: [Field, RegExp][] = [
-  ['partNumber', /^(customer\s*)?(part|item|component|dwg|drawing)\s*(no\.?|num(ber)?|#|id)?$|^p\/?n$|^part$|^mpn$/],
-  ['revision', /^rev(\.|ision)?(\s*level)?$/],
-  ['description', /^(part\s*|item\s*)?(desc(\.|ription)?|name|title)$/],
-  ['qtyPer', /^(qty|quantity)(\s*(per|\/)\s*(assy|assembly|unit|ea))?\.?$|^(qty|quantity)\s*per$|^usage$|^per$/],
-  ['material', /^(material|matl|mat'?l|raw material|resin|alloy)$/],
-  ['notes', /^(notes?|comments?|remarks?)$/],
-  ['level', /^(bom\s*)?level$|^lvl$/],
+// Each pattern carries a strength: a column headed "Part Number" beats one headed "Item Number", which
+// beats a bare "Item" -- usually the BOM's line or find number, used as the part number only when the
+// sheet has nothing better.
+const FIELD_PATTERNS: [Field, RegExp, number][] = [
+  ['partNumber', /^(customer\s*|mfr\.?\s*|manufacturer\s*)?(part|component|dwg|drawing)\s*(no\.?|num(ber)?|#|id)?$|^p\/?n$|^mpn$/, 3],
+  ['partNumber', /^item\s*(no\.?|num(ber)?|#|id)$/, 2],
+  ['partNumber', /^item$/, 1],
+  ['revision', /^rev(\.|ision)?(\s*level)?$/, 3],
+  ['description', /^(part\s*|item\s*)?(desc(\.|ription)?|name|title)$/, 3],
+  ['qtyPer', /^(qty|quantity)(\s*(per|\/)\s*(assy|assembly|unit|ea))?\.?$|^(qty|quantity)\s*per$|^usage$|^per$/, 3],
+  ['material', /^(material|matl|mat'?l|raw material|resin|alloy)$/, 3],
+  ['notes', /^(notes?|comments?|remarks?)$/, 3],
+  ['level', /^(bom\s*)?level$|^lvl$/, 3],
 ];
 
 const norm = (v: unknown): string => String(v ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
 
 function headerFields(row: readonly unknown[]): Map<Field, number> {
-  const found = new Map<Field, number>();
+  const best = new Map<Field, { col: number; strength: number }>();
   row.forEach((cell, i) => {
     const text = norm(cell);
     if (!text) return;
-    for (const [field, re] of FIELD_PATTERNS) {
-      if (!found.has(field) && re.test(text)) {
-        found.set(field, i);
-        return;
-      }
-    }
+    const hit = FIELD_PATTERNS.find(([, re]) => re.test(text));
+    if (!hit) return;
+    const [field, , strength] = hit;
+    const prior = best.get(field);
+    if (!prior || strength > prior.strength) best.set(field, { col: i, strength });
   });
-  return found;
+  return new Map([...best].map(([f, b]) => [f, b.col]));
 }
 
 const cellText = (row: readonly unknown[], i: number | undefined): string => (i === undefined ? '' : String(row[i] ?? '').trim());
