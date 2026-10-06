@@ -55,7 +55,7 @@ function Accounts() {
           <label className="field">Email<input value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} placeholder="Printed on quotes they send" /></label>
           <label className="field">Role<select value={f.role} onChange={(e) => setF({ ...f, role: e.target.value as Role })}>{(Object.keys(ROLE_NAMES) as Role[]).map((r) => <option key={r} value={r}>{ROLE_NAMES[r]}</option>)}</select></label>
           <label className="field">Department{f.role === 'estimator' ? '' : ' (estimators)'}<select value={f.department} onChange={(e) => setF({ ...f, department: e.target.value })}><option value="">—</option>{app.departments.map((d) => <option key={d.key} value={d.key}>{d.name}</option>)}</select></label>
-          <label className="field">Temporary password<input value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} /></label>
+          <label className="field">Temporary password (at least 8 characters)<input value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} /></label>
         </div>
         <ErrorBanner error={error} />
         {passwordFor && (
@@ -67,10 +67,15 @@ function Accounts() {
             <label className="field">Temporary password (at least 8 characters)<input value={temp} onChange={(e) => setTemp(e.target.value)} autoFocus /></label>
           </Dialog>
         )}
-        <div><button className="btn primary" disabled={!f.displayName || f.password.length < 8} onClick={() => act(async () => {
+        <div className="row"><button className="btn primary" disabled={!f.displayName.trim() || f.password.length < 8} onClick={() => act(async () => {
           await post('/users', { ...f, id: f.id || f.displayName.toLowerCase().trim().replace(/\s+/g, '.'), department: f.department || null });
           setF({ id: '', displayName: '', role: 'sales', department: '', email: '', password: '' });
-        }, `${f.displayName} added.`)}>Add</button></div>
+        }, `${f.displayName} added.`)}>Add</button>
+          {(() => {
+            const missing = [!f.displayName.trim() && 'a name', f.password.length < 8 && `a temporary password of at least 8 characters${f.password ? ` (${f.password.length} so far)` : ''}`].filter(Boolean);
+            return missing.length > 0 && (f.displayName || f.password || f.id || f.email) ? <span className="muted small" style={{ marginLeft: 10 }}>Still needed: {missing.join(' and ')}.</span> : null;
+          })()}
+        </div>
       </div>
     </div>
   );
