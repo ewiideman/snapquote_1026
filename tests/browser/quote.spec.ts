@@ -123,7 +123,7 @@ test('from RFQ email to won', async ({ browser }) => {
 
   // A stray draft is deleted, the deletion undone, and deleted again.
   await jon.goto('/');
-  await jon.getByRole('button', { name: 'Start a blank quote' }).click();
+  await jon.getByRole('button', { name: 'New quote' }).click();
   await expect(jon).toHaveURL(/#\/quotes\/\d+$/);
   const stray = jon.url();
   await jon.getByRole('button', { name: 'Delete quote' }).click();

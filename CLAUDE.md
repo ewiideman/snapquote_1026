@@ -38,6 +38,13 @@ Read README.md first. This file is the rules and where things stand.
   named and never merged), `src/persistence/directory.ts` (one transaction, audit `directory.imported`).
   Migration 0004: `imported jsonb` on `quote.customer` and `quote.supplier` holds the old rows as
   exported. `emailDomainOf` (`src/quoting/email-domain.ts`) is the one domain rule.
+- State (2026-10-06, design): **the Quotes page is redesigned on a design system** (`docs/design-system.md`):
+  tokens in `src/ui/styles.css`, Inter bundled from `@fontsource-variable/inter` (no font CDN), a left
+  sidebar (icon rail 721-1199px, menu on a phone), and on the board a compact RFQ strip (`DropStrip`),
+  the summary as filters, one toolbar, and cards that say the next step from the board's own data
+  (`nextOf` in `src/ui/pages/Board.tsx`; `sentAt` added to the board card). Blue is for action and
+  selection only; status is words plus color. Other screens take the tokens and shell; their own
+  redesign is still to come.
 - **On-prem only. Period.** The app, PostgreSQL and attached files run on Mack's server. No cloud
   service, no outside API, no CDN at run time. Libraries are npm packages bundled at build.
 - **American English** everywhere: code, comments, screens, docs.

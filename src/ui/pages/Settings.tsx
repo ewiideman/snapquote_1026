@@ -3,10 +3,9 @@ import { useEffect, useState } from 'react';
 import { get, patch, post, put } from '../lib/api.ts';
 import { useAsync } from '../lib/useAsync.ts';
 import type { Role } from '../lib/types.ts';
-import { Dialog, ErrorBanner, NumberInput, useApp } from '../components/ui.tsx';
+import { Dialog, ErrorBanner, NumberInput, ROLE_NAMES, useApp } from '../components/ui.tsx';
 import { ago } from '../lib/format.ts';
 
-const ROLE_NAMES: Record<Role, string> = { sales: 'Business development', estimator: 'Estimator', manager: 'Manager', administrator: 'Administrator' };
 
 interface Listing { id: string; displayName: string; role: Role; department: string | null; email: string | null; canSignIn: boolean; disabledAt: string | null; lastSignedInAt: string | null }
 

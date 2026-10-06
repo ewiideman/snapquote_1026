@@ -225,6 +225,8 @@ export interface BoardCard {
   firstTotal: number | null;
   awardAmount: number | null;
   updatedAt: string;
+  /** When the customer's copy was marked sent; null before that. */
+  sentAt: string | null;
   closedAt: string | null;
 }
 
@@ -249,7 +251,7 @@ export async function board(db: Queryable, closedDays = 45): Promise<BoardCard[]
       id: h.id, number: h.number, revision: h.revision, customerName: h.customerName, title: h.title, ownerId: h.ownerId, ownerName: h.ownerName,
       stage: stageOf(h.status, r.requests), customerDueOn: h.customerDueOn, itar: h.itar, lineCount: r.line_count,
       departments: r.requests.map((x) => x.department), waitingOn: w.departments, questionsFrom: w.questions, neededBy: needed,
-      firstQuantity: detail?.sheet.assembly ? (h.quantities[0] ?? null) : null, firstTotal, awardAmount: h.awardAmount, updatedAt: h.updatedAt, closedAt: h.closedAt,
+      firstQuantity: detail?.sheet.assembly ? (h.quantities[0] ?? null) : null, firstTotal, awardAmount: h.awardAmount, updatedAt: h.updatedAt, sentAt: h.sentAt, closedAt: h.closedAt,
     });
   }
   return out;

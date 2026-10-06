@@ -1,10 +1,11 @@
 import { StrictMode, useCallback, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
+import '@fontsource-variable/inter/wght.css';
 import './styles.css';
 import { get, post, SIGNED_OUT_EVENT } from './lib/api.ts';
 import { useRoute } from './lib/router.ts';
 import type { Account, BoardCard, Department, QueueItem } from './lib/types.ts';
-import { AppContext, canSell, Toast, type AppState } from './components/ui.tsx';
+import { AppContext, canSell, Icon, ROLE_NAMES, Toast, type AppState, type IconName } from './components/ui.tsx';
 import { SignIn, ChangePassword, AccountPage } from './pages/SignIn.tsx';
 import { Board, DeletedQuotes } from './pages/Board.tsx';
 import { Queue } from './pages/Queue.tsx';
@@ -16,17 +17,38 @@ import { WorkCells } from './pages/WorkCells.tsx';
 function Brand() {
   return (
     <span className="brand">
-      <span className="brand-mark"><svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" /></svg></span>
-      SnapQuote
+      <span className="brand-mark"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" /></svg></span>
+      <span className="brand-name">SnapQuote</span>
     </span>
   );
 }
+
+/** One destination in the sidebar. The label stays in the page for screen readers when the rail hides it. */
+function NavLink({ href, icon, label, on, count, countTitle }: { href: string; icon: IconName; label: string; on: boolean; count?: number; countTitle?: string }) {
+  return (
+    <a className={on ? 'on' : ''} href={href} aria-current={on ? 'page' : undefined} data-tip={label}>
+      <Icon name={icon} />
+      <span className="label">{label}</span>
+      {!!count && <span className="count" title={countTitle}>{count}<span className="sr"> {countTitle ?? ''}</span></span>}
+    </a>
+  );
+}
+
+const initials = (name: string) => name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]?.toUpperCase() ?? '').join('');
 
 function App() {
   const [session, setSession] = useState<{ account: Account | null; departments: Department[] } | null>(null);
   const [toast, setToast] = useState<{ text: string; action?: { label: string; run: () => void }; key: number } | null>(null);
   const [counts, setCounts] = useState<{ attention: number; queue: number }>({ attention: 0, queue: 0 });
+  const [menu, setMenu] = useState(false);
   const route = useRoute();
+  useEffect(() => { setMenu(false); }, [route.path]);
+  useEffect(() => {
+    if (!menu) return;
+    const on = (e: KeyboardEvent) => { if (e.key === 'Escape') setMenu(false); };
+    window.addEventListener('keydown', on);
+    return () => window.removeEventListener('keydown', on);
+  }, [menu]);
 
   const load = useCallback(() => {
     get<{ account: Account | null; departments: Department[] }>('/session').then(setSession, () => setSession({ account: null, departments: [] }));
@@ -78,25 +100,42 @@ function App() {
   else if (path === '/account') page = <AccountPage account={account} onChanged={(a, said) => { setSession({ account: a, departments: session.departments }); state.toast(said); }} />;
   else page = <Board />;
 
-  const on = (p: string) => (p === '/' ? (path === '/' || path === '/board') : path.startsWith(p)) ? 'on' : '';
+  const on = (p: string) => (p === '/' ? (path === '/' || path === '/board') : path.startsWith(p));
+  const signOut = () => post('/session/sign-out').then(() => setSession({ account: null, departments: session.departments }));
+  const waiting = seller ? counts.attention : counts.queue;
   return (
     <AppContext.Provider value={state}>
-      <div className="topbar">
-        <a href="#/" style={{ textDecoration: 'none' }}><Brand /></a>
-        <nav className="nav">
-          {seller ? <a className={on('/')} href="#/">Quotes{counts.attention > 0 && <span className="count" title="Ready to send or waiting on an answer">{counts.attention}</span>}</a>
-            : <a className={on('/') || on('/queue')} href="#/queue">My queue{counts.queue > 0 && <span className="count">{counts.queue}</span>}</a>}
-          {seller && account.role !== 'sales' && <a className={on('/queue')} href="#/queue">Department queues</a>}
-          {!seller && <a className={on('/board')} href="#/board">All quotes</a>}
-          {((account.role === 'estimator' && account.department === 'metals') || account.role === 'manager' || account.role === 'administrator') && <a className={on('/work-cells')} href="#/work-cells">Work cells</a>}
-          {account.role === 'administrator' && <a className={on('/settings')} href="#/settings">Settings</a>}
-        </nav>
-        <div className="who">
-          <a href="#/account" style={{ color: 'inherit' }}><b>{account.displayName}</b></a>
-          <button onClick={() => post('/session/sign-out').then(() => setSession({ account: null, departments: session.departments }))}>Sign out</button>
-        </div>
+      <div className="shell">
+        <aside className={`sidebar${menu ? ' open' : ''}`}>
+          <div className="side-top">
+            <a href="#/" className="brand-link" aria-label="SnapQuote home"><Brand /></a>
+            <button type="button" className="icon-btn menu-btn" aria-expanded={menu} aria-controls="side-menu" aria-label={menu ? 'Close the menu' : 'Open the menu'} onClick={() => setMenu(!menu)}>
+              <Icon name={menu ? 'close' : 'menu'} />
+              {!menu && waiting > 0 && <span className="menu-dot" aria-hidden="true" />}
+            </button>
+          </div>
+          <div className="side-menu" id="side-menu">
+            <nav className="sidenav" aria-label="Main">
+              {seller
+                ? <NavLink href="#/" icon="quotes" label="Quotes" on={on('/')} count={counts.attention} countTitle="ready to send or waiting on an answer" />
+                : <NavLink href="#/queue" icon="inbox" label="My queue" on={on('/') || on('/queue')} count={counts.queue} countTitle="waiting on your department" />}
+              {seller && account.role !== 'sales' && <NavLink href="#/queue" icon="inbox" label="Department queues" on={on('/queue')} />}
+              {!seller && <NavLink href="#/board" icon="board" label="All quotes" on={on('/board')} />}
+              {((account.role === 'estimator' && account.department === 'metals') || account.role === 'manager' || account.role === 'administrator') && <NavLink href="#/work-cells" icon="cells" label="Work cells" on={on('/work-cells')} />}
+              {account.role === 'administrator' && <NavLink href="#/settings" icon="settings" label="Settings" on={on('/settings')} />}
+            </nav>
+            <div className="side-foot">
+              <a href="#/account" className={`me${on('/account') ? ' on' : ''}`} aria-current={on('/account') ? 'page' : undefined} data-tip={`${account.displayName}: your account`}>
+                <span className="avatar" aria-hidden="true">{initials(account.displayName)}</span>
+                <span className="label"><b>{account.displayName}</b><small>{account.role === 'estimator' && account.department ? state.deptName(account.department) : ROLE_NAMES[account.role]}</small></span>
+              </a>
+              <button type="button" className="icon-btn signout" onClick={signOut} title="Sign out" data-tip="Sign out"><Icon name="signout" /><span className="sr">Sign out</span></button>
+            </div>
+          </div>
+        </aside>
+        {menu && <div className="side-scrim" onClick={() => setMenu(false)} />}
+        <main className="main">{page}</main>
       </div>
-      {page}
       {toast && <Toast key={toast.key} text={toast.text} {...(toast.action ? { action: toast.action } : {})} onDone={() => setToast(null)} />}
     </AppContext.Provider>
   );

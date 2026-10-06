@@ -11,7 +11,7 @@ export interface Person { id: string; displayName: string; role: Role; departmen
 export interface BoardCard {
   id: number; number: string; revision: number; customerName: string | null; title: string; ownerId: string; ownerName: string; stage: Stage;
   customerDueOn: string | null; itar: boolean; lineCount: number; departments: DepartmentKey[]; waitingOn: DepartmentKey[]; questionsFrom: DepartmentKey[];
-  neededBy: string | null; firstQuantity: number | null; firstTotal: number | null; awardAmount: number | null; updatedAt: string; closedAt: string | null;
+  neededBy: string | null; firstQuantity: number | null; firstTotal: number | null; awardAmount: number | null; updatedAt: string; sentAt: string | null; closedAt: string | null;
 }
 
 export interface QueueItem {
@@ -62,5 +62,5 @@ export interface DropResult {
 }
 
 export const STAGE_NAMES: Record<Stage, string> = {
-  draft: 'Drafting', estimating: 'With the departments', ready: 'Ready to send', sent: 'With the customer', won: 'Won', lost: 'Lost', no_bid: 'No bid',
+  draft: 'Drafting', estimating: 'With departments', ready: 'Ready to send', sent: 'With the customer', won: 'Won', lost: 'Lost', no_bid: 'No bid',
 };
