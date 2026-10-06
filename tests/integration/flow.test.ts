@@ -360,6 +360,40 @@ test('Machining and Assembly price with their calculators: the workbook example,
   assert.match(tiny.body.problems.join(' '), /rounds to 0.00 hours/);
 });
 
+test('business development deletes a quote: off the board and the queues, requests withdrawn and restored, a won quote kept', async () => {
+  const jon = await session('jon.whitney');
+  const metals = await session('metals.est');
+  // A draft goes quietly.
+  const draft = (await jon('POST', '/quotes', {})).body.id as number;
+  assert.equal((await jon('POST', `/quotes/${draft}/delete`, {})).status, 200);
+  assert.ok(!(await jon('GET', '/board')).body.some((c: any) => c.id === draft));
+  assert.equal((await metals('POST', `/quotes/${draft}/delete`, {})).status, 403, 'estimators do not delete quotes');
+
+  // One with Metals withdraws Metals' request, tells Metals, and refuses changes until restored.
+  const qid = (await jon('POST', '/quotes', {})).body.id as number;
+  await jon('PATCH', `/quotes/${qid}`, { customerName: 'Stryker', quantities: [50] });
+  await jon('PUT', `/quotes/${qid}/lines`, { lines: [{ partNumber: 'BRK-9', revision: '', description: 'Bracket', qtyPer: 1, notes: '', department: 'metals' }] });
+  assert.equal((await jon('POST', `/quotes/${qid}/send-to-estimating`, {})).status, 200);
+  assert.ok((await metals('GET', '/queue/metals')).body.some((x: any) => x.quoteId === qid));
+  assert.equal((await jon('POST', `/quotes/${qid}/delete`, { reason: 'Duplicate RFQ' })).status, 200);
+  assert.ok(!(await metals('GET', '/queue/metals')).body.some((x: any) => x.quoteId === qid), 'off the queue');
+  const told = await db.query<{ subject: string }>("SELECT subject FROM app.notification WHERE quote_id = $1 AND kind = 'quote.deleted' AND to_user = 'metals.est'", [qid]);
+  assert.equal(told.length, 1);
+  assert.match(told[0]?.subject ?? '', /withdrawn: no prices needed from Metals/);
+  const d = (await jon('GET', `/quotes/${qid}`)).body;
+  assert.deepEqual([d.quote.deleteReason, d.quote.deletedByName], ['Duplicate RFQ', 'Jon Whitney']);
+  assert.equal((await jon('PATCH', `/quotes/${qid}`, { title: 'x' })).status, 409, 'no changes while deleted');
+  assert.ok((await jon('GET', '/deleted-quotes')).body.some((x: any) => x.id === qid));
+  assert.equal((await jon('POST', `/quotes/${qid}/restore`, {})).status, 200);
+  assert.ok((await metals('GET', '/queue/metals')).body.some((x: any) => x.quoteId === qid && x.status === 'open'), 'its request is back');
+  assert.equal((await jon('POST', `/quotes/${qid}/restore`, {})).status, 409);
+  assert.equal((await db.query("SELECT 1 FROM app.audit_event WHERE action IN ('quote.deleted', 'quote.restored') AND entity_id = $1", [String(qid)])).length, 2);
+
+  // A won quote is the record of an order.
+  const won = (await db.query<{ id: number }>("SELECT id FROM quote.quote WHERE status = 'won' LIMIT 1"))[0];
+  if (won) assert.equal((await jon('POST', `/quotes/${won.id}/delete`, {})).status, 409);
+});
+
 test('signed out, nothing but the session is reachable', async () => {
   assert.equal((await fetch(`${base}/board`)).status, 401);
   assert.equal((await fetch(`${base}/files/1`)).status, 401);

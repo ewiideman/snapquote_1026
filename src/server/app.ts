@@ -11,7 +11,7 @@ import {
   changeOwnPassword, createAccount, updateOwnEmail, listAccounts, listPeople, readCookie, sessionAccount, sessionCookie, signIn, signOut, updateAccount, SESSION_COOKIE, type Account,
 } from '../persistence/accounts.ts';
 import {
-  answerRequest, assignRequest, board, closeQuote, createQuote, customers, LOST_REASONS, markSent, postMessage, queue, quoteDetail, reviseQuote, saveEstimate, saveLines,
+  answerRequest, assignRequest, board, closeQuote, createQuote, deletedQuotes, deleteQuote, restoreQuote, customers, LOST_REASONS, markSent, postMessage, queue, quoteDetail, reviseQuote, saveEstimate, saveLines,
   sendToEstimating, setOverride, updateHeader,
 } from '../persistence/quotes.ts';
 import { attachmentFile, dropFile, MAX_FILE_BYTES, readStored, removeAttachment } from '../persistence/files.ts';
@@ -218,6 +218,20 @@ export function createApp(db: Database, options: AppOptions): express.Express {
     await closeQuote(db, me(res), id(req), { outcome: b['outcome'], reason: b['reason'], poNumber: b['poNumber'], awardAmount: b['awardAmount'], orderedQuantity: b['orderedQuantity'] });
     void options.exchange?.writeNow(); // a win is news for the scheduler: tell it now, not in ten minutes
     res.json(await quoteDetail(db, id(req)));
+  });
+  // Deleting hides a quote everywhere and withdraws its open requests; it can be restored.
+  api.post('/quotes/:id/delete', async (req, res) => {
+    await deleteQuote(db, me(res), id(req), { reason: body(req)['reason'] });
+    void options.exchange?.writeNow(); // gone from the scheduler's list too
+    res.json({ ok: true });
+  });
+  api.post('/quotes/:id/restore', async (req, res) => {
+    await restoreQuote(db, me(res), id(req));
+    void options.exchange?.writeNow();
+    res.json(await quoteDetail(db, id(req)));
+  });
+  api.get('/deleted-quotes', async (_req, res) => {
+    res.json(await deletedQuotes(db));
   });
   api.get('/quotes/:id/pdf', async (req, res) => {
     const d = await quoteDetail(db, id(req));

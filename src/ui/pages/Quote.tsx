@@ -203,6 +203,32 @@ function NextStep({ d, lines, reload, setError, dirty }: { d: QuoteDetail; lines
   );
 }
 
+function DeleteDialog({ d, onClose }: { d: QuoteDetail; onClose: () => void }) {
+  const app = useApp();
+  const [reason, setReason] = useState('');
+  const [error, setError] = useState<unknown>(null);
+  const q = d.quote;
+  const open = d.requests.filter((r) => r.status === 'open' || r.status === 'question');
+  return (
+    <Dialog title={`Delete ${q.number}${q.revision ? ` rev ${q.revision}` : ''}?`} onClose={onClose} footer={<>
+      <button className="btn" onClick={onClose}>Cancel</button>
+      <button className="btn danger" onClick={async () => {
+        setError(null);
+        try {
+          await post(`/quotes/${q.id}/delete`, { reason });
+          app.refreshCounts();
+          location.hash = '#/';
+          app.toast(`${q.number} deleted.`, { label: 'Undo', run: () => { void post(`/quotes/${q.id}/restore`).then(() => { app.toast(`${q.number} restored.`); app.refreshCounts(); location.hash = `#/quotes/${q.id}`; }); } });
+        } catch (err) { setError(err); }
+      }}>Delete</button>
+    </>}>
+      <p className="muted">It comes off the board{open.length ? ` and off ${open.map((r) => app.deptName(r.department)).join(' and ')}'s queue${open.length > 1 ? 's' : ''} (they get an email saying no prices are needed)` : ''}. Nothing on it is lost: it can be restored from Deleted quotes on the board.</p>
+      <label className="field">Why? (optional)<textarea value={reason} onChange={(e) => setReason(e.target.value)} autoFocus placeholder="e.g. Duplicate of Q26-0012, or the customer withdrew the RFQ" /></label>
+      <ErrorBanner error={error} />
+    </Dialog>
+  );
+}
+
 export function CloseDialog({ d, outcome, onClose, onDone }: { d: QuoteDetail; outcome: 'won' | 'lost' | 'no_bid'; onClose: () => void; onDone: (d: QuoteDetail) => void }) {
   const [reason, setReason] = useState('');
   const [other, setOther] = useState('');
@@ -503,8 +529,14 @@ export function QuotePage({ id }: { id: number }) {
   const seller = canSell(app.account);
   const q = d?.quote;
   const closed = !!q && ['won', 'lost', 'no_bid'].includes(q.status);
-  const editableHeader = seller && !closed;
-  const editableParts = seller && !!q && (q.status === 'draft' || q.status === 'estimating');
+  const deleted = !!q?.deletedAt;
+  const editableHeader = seller && !closed && !deleted;
+  const editableParts = seller && !!q && !deleted && (q.status === 'draft' || q.status === 'estimating');
+  const [deleting, setDeleting] = useState(false);
+  const restore = async () => {
+    setActionError(null);
+    try { setD(await post<QuoteDetail>(`/quotes/${id}/restore`)); app.toast(`${q?.number} restored.`); app.refreshCounts(); } catch (err) { setActionError(err); }
+  };
   const [saveState, setSaveState] = useState<SaveState>('idle');
   const save = async (change: Record<string, unknown>) => {
     setActionError(null);
@@ -531,12 +563,20 @@ export function QuotePage({ id }: { id: number }) {
           {q.sourceEmail && <div className="muted small">From the email “{q.sourceEmail.subject}” · {q.sourceEmail.from}</div>}
         </div>
         <div className="row">
-          {d.stage !== 'draft' && <a className="btn" href={`#/quotes/${id}/send`}>{d.stage === 'ready' ? 'Review and send' : 'Prices'}</a>}
+          {d.stage !== 'draft' && !deleted && <a className="btn" href={`#/quotes/${id}/send`}>{d.stage === 'ready' ? 'Review and send' : 'Prices'}</a>}
+          {seller && !deleted && q.status !== 'won' && <button className="btn ghost" onClick={() => setDeleting(true)}>Delete quote</button>}
         </div>
       </div>
+      {deleted && (
+        <div className="banner warn row" style={{ justifyContent: 'space-between' }}>
+          <span><b>Deleted</b>{q.deletedByName ? ` by ${q.deletedByName}` : ''}{q.deletedAt ? `, ${shortDate(q.deletedAt)}` : ''}{q.deleteReason ? `: ${q.deleteReason}` : ''}. It is off the board and every queue.</span>
+          {seller && <button className="btn small" onClick={() => void restore()}>Restore</button>}
+        </div>
+      )}
+      {deleting && <DeleteDialog d={d} onClose={() => setDeleting(false)} />}
       <Steps d={d} />
       <ErrorBanner error={actionError} />
-      <NextStep d={d} lines={d.lines} reload={refresh} setError={setActionError} dirty={partsDirty} />
+      {!deleted && <NextStep d={d} lines={d.lines} reload={refresh} setError={setActionError} dirty={partsDirty} />}
 
       <div className="layout">
         <div className="stack">

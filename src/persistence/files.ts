@@ -108,9 +108,10 @@ export async function dropFile(db: Database, actor: Account, quoteId: number, fi
     }
   }));
   await db.transaction(async (tx) => {
-    const q = (await tx.query<{ status: string; title: string; contact_email: string | null; customer_id: number | null; rfq_received_on: string | null }>(
-      'SELECT status, title, contact_email, customer_id, rfq_received_on FROM quote.quote WHERE id = $1 FOR UPDATE', [quoteId]))[0];
+    const q = (await tx.query<{ status: string; title: string; contact_email: string | null; customer_id: number | null; rfq_received_on: string | null; deleted_at: string | null }>(
+      'SELECT deleted_at, status, title, contact_email, customer_id, rfq_received_on FROM quote.quote WHERE id = $1 FOR UPDATE', [quoteId]))[0];
     if (!q) throw new HttpError(404, 'No such quote.');
+    if (q.deleted_at) throw new HttpError(409, 'This quote was deleted. Restore it to change it.');
     if (q.status === 'won' || q.status === 'lost' || q.status === 'no_bid') throw new HttpError(409, 'This quote is closed.');
     const canAddParts = actor.role !== 'estimator' && (q.status === 'draft' || q.status === 'estimating');
     result.attachments.push({ id: await insertAttachment(tx, actor, quoteId, { fileName: file.fileName, contentType: file.contentType ?? '', bytes: file.bytes }, 'upload', storageDir), fileName: safeName(file.fileName) });

@@ -173,6 +173,7 @@ export function Board() {
         </div>
         <input placeholder="Find a customer, quote number or person" value={search} onChange={(e) => setSearch(e.target.value)} style={{ width: 300 }} />
         {focus && <button className="link" onClick={() => setFocus(null)}>Show all</button>}
+        {seller && <a className="link small" href="#/deleted" style={{ marginLeft: 'auto' }}>Deleted quotes</a>}
       </div>
       <ErrorBanner error={error} />
       <div className="columns">
@@ -187,6 +188,41 @@ export function Board() {
           );
         })}
       </div>
+    </div>
+  );
+}
+
+/** Quotes deleted in the last 90 days, to restore one deleted by mistake. */
+export function DeletedQuotes() {
+  const app = useApp();
+  const { data, error, reload } = useAsync(() => get<{ id: number; number: string; revision: number; customerName: string | null; title: string; ownerName: string; deletedAt: string; deletedByName: string | null; deleteReason: string | null }[]>('/deleted-quotes'), []);
+  const [actionError, setActionError] = useState<unknown>(null);
+  return (
+    <div className="page narrow stack">
+      <p><a href="#/">Quotes</a> / Deleted</p>
+      <h1>Deleted quotes</h1>
+      <p className="muted">The last 90 days. A restored quote goes back where it was, with any department requests its deletion withdrew.</p>
+      <ErrorBanner error={error ?? actionError} />
+      {data && data.length === 0 && <div className="empty">Nothing deleted.</div>}
+      {data && data.length > 0 && (
+        <table className="grid card">
+          <thead><tr><th>Quote</th><th>Customer</th><th>Deleted</th><th>Why</th><th /></tr></thead>
+          <tbody>
+            {data.map((q) => (
+              <tr key={q.id}>
+                <td><a className="mono" href={`#/quotes/${q.id}`}>{q.number}{q.revision ? ` rev ${q.revision}` : ''}</a><div className="muted small">{q.title}</div></td>
+                <td>{q.customerName ?? <span className="muted">—</span>}</td>
+                <td className="small">{q.deletedByName}, {ago(q.deletedAt)}</td>
+                <td className="small">{q.deleteReason ?? ''}</td>
+                <td className="right"><button className="btn small" onClick={async () => {
+                  setActionError(null);
+                  try { await post(`/quotes/${q.id}/restore`); app.toast(`${q.number} restored.`); app.refreshCounts(); reload(); } catch (err) { setActionError(err); }
+                }}>Restore</button></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
     </div>
   );
 }

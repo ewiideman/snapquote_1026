@@ -45,6 +45,7 @@ export interface QuoteHeader {
   rfqReceivedOn: string | null; customerDueOn: string | null; ownerId: string; ownerName: string; quantities: number[]; itar: boolean; notes: string;
   status: 'draft' | 'estimating' | 'sent' | 'won' | 'lost' | 'no_bid'; sourceEmail: { subject: string; from: string; date: string | null } | null;
   sentAt: string | null; closedAt: string | null; closeReason: string | null; poNumber: string | null; awardAmount: number | null; orderedQuantity: number | null; createdAt: string; updatedAt: string;
+  deletedAt: string | null; deletedByName: string | null; deleteReason: string | null;
 }
 
 export interface QuoteDetail {

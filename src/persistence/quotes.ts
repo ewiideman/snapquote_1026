@@ -52,6 +52,10 @@ export interface QuoteHeader {
   orderedQuantity: number | null;
   createdAt: string;
   updatedAt: string;
+  /** Set when business development deleted the quote; it can be restored. */
+  deletedAt: string | null;
+  deletedByName: string | null;
+  deleteReason: string | null;
 }
 
 export interface Line {
@@ -119,21 +123,26 @@ type QuoteRow = {
   rfq_received_on: string | null; customer_due_on: string | null; owner_id: string; owner_name: string; quantities: number[]; itar: boolean; notes: string; status: QuoteStatus;
   source_email: { subject: string; from: string; date: string | null } | null; sent_at: string | null; closed_at: string | null; close_reason: string | null; po_number: string | null;
   award_amount: string | null; ordered_quantity: number | null; created_at: string; updated_at: string;
+  deleted_at: string | null; deleted_by_name: string | null; delete_reason: string | null;
 };
 
-const QUOTE_SELECT = `SELECT q.*, c.name AS customer_name, u.display_name AS owner_name
-  FROM quote.quote q LEFT JOIN quote.customer c ON c.id = q.customer_id JOIN app.user_account u ON u.id = q.owner_id`;
+const QUOTE_SELECT = `SELECT q.*, c.name AS customer_name, u.display_name AS owner_name, d.display_name AS deleted_by_name
+  FROM quote.quote q LEFT JOIN quote.customer c ON c.id = q.customer_id JOIN app.user_account u ON u.id = q.owner_id
+  LEFT JOIN app.user_account d ON d.id = q.deleted_by`;
 
 const toHeader = (r: QuoteRow): QuoteHeader => ({
   id: r.id, number: r.number, revision: r.revision, customerId: r.customer_id, customerName: r.customer_name, title: r.title, contactName: r.contact_name, contactEmail: r.contact_email,
   rfqReceivedOn: r.rfq_received_on, customerDueOn: r.customer_due_on, ownerId: r.owner_id, ownerName: r.owner_name, quantities: r.quantities.map(Number), itar: r.itar, notes: r.notes,
   status: r.status, sourceEmail: r.source_email, sentAt: r.sent_at, closedAt: r.closed_at, closeReason: r.close_reason, poNumber: r.po_number, awardAmount: numOrNull(r.award_amount),
   orderedQuantity: r.ordered_quantity, createdAt: r.created_at, updatedAt: r.updated_at,
+  deletedAt: r.deleted_at, deletedByName: r.deleted_by_name, deleteReason: r.delete_reason,
 });
 
 async function header(db: Queryable, id: number, lock = false): Promise<QuoteHeader> {
   const rows = await db.query<QuoteRow>(`${QUOTE_SELECT} WHERE q.id = $1${lock ? ' FOR UPDATE OF q' : ''}`, [id]);
   if (!rows[0]) throw new HttpError(404, 'No such quote.');
+  // Every change to a quote locks it here first, so a deleted quote takes no changes until restored.
+  if (lock && rows[0].deleted_at) throw new HttpError(409, 'This quote was deleted. Restore it to change it.');
   return toHeader(rows[0]);
 }
 
@@ -225,7 +234,7 @@ export async function board(db: Queryable, closedDays = 45): Promise<BoardCard[]
     `${QUOTE_SELECT.replace('SELECT q.*', `SELECT q.*,
         (SELECT count(*)::int FROM quote.line l WHERE l.quote_id = q.id AND l.removed_at IS NULL) AS line_count,
         coalesce((SELECT json_agg(json_build_object('department', r.department, 'status', r.status, 'needed_by', r.needed_by)) FROM quote.request r WHERE r.quote_id = q.id AND r.status <> 'withdrawn'), '[]') AS requests`)}
-      WHERE q.status IN ('draft', 'estimating', 'sent') OR q.closed_at > now() - make_interval(days => $1)
+      WHERE q.deleted_at IS NULL AND (q.status IN ('draft', 'estimating', 'sent') OR q.closed_at > now() - make_interval(days => $1))
       ORDER BY q.updated_at DESC`, [closedDays]);
   const out: BoardCard[] = [];
   for (const r of rows) {
@@ -273,7 +282,7 @@ export async function queue(db: Queryable, department: DepartmentKey): Promise<Q
               WHERE l.quote_id = q.id AND l.department = r.department AND l.removed_at IS NULL) AS priced
        FROM quote.request r JOIN quote.quote q ON q.id = r.quote_id LEFT JOIN quote.customer c ON c.id = q.customer_id
        JOIN app.user_account o ON o.id = q.owner_id LEFT JOIN app.user_account a ON a.id = r.assignee_id
-      WHERE r.department = $1 AND q.status = 'estimating' AND (r.status IN ('open', 'question') OR r.answered_at > now() - interval '30 days')
+      WHERE r.department = $1 AND q.status = 'estimating' AND q.deleted_at IS NULL AND (r.status IN ('open', 'question') OR r.answered_at > now() - interval '30 days')
       ORDER BY r.status = 'answered', r.needed_by NULLS LAST, r.sent_at`, [department]);
   return rows.map((r) => ({
     requestId: r.request_id, quoteId: r.quote_id, number: r.number, customerName: r.customer_name, title: r.title, ownerName: r.owner_name, status: r.status, neededBy: r.needed_by,
@@ -694,6 +703,48 @@ export async function closeQuote(db: Database, actor: Account, quoteId: number, 
     await event(tx, quoteId, actor.id, `${words}${reason ? `: ${reason}` : ''}${outcome === 'won' && input.poNumber ? ` (PO ${String(input.poNumber).trim()})` : ''}.`);
     await audit(tx, actor.id, 'quote.closed', 'quote', quoteId, { outcome, reason });
   });
+}
+
+// ---------------------------------------------------------------- deleting and restoring
+
+/** Deletes a quote: hidden everywhere, its open requests withdrawn (their estimators told), restorable. */
+export async function deleteQuote(db: Database, actor: Account, quoteId: number, input: { reason?: unknown }): Promise<void> {
+  requireSeller(actor);
+  const reason = optText(input.reason, 1000);
+  await db.transaction(async (tx) => {
+    const q = await header(tx, quoteId, true);
+    if (q.status === 'won') throw new HttpError(409, 'A won quote is the record of an order and cannot be deleted.');
+    const open = await tx.query<{ id: number; department: DepartmentKey; status: RequestStatus }>(
+      "SELECT id, department, status FROM quote.request WHERE quote_id = $1 AND status IN ('open', 'question')", [quoteId]);
+    await tx.query("UPDATE quote.request SET status = 'withdrawn' WHERE id = ANY($1::bigint[])", [open.map((r) => r.id)]);
+    await tx.query('UPDATE quote.quote SET deleted_at = now(), deleted_by = $2, delete_reason = $3, deleted_requests = $4::jsonb, updated_at = now() WHERE id = $1',
+      [quoteId, actor.id, reason, JSON.stringify(open.map((r) => ({ id: r.id, status: r.status })))]);
+    const facts = await quoteFacts(tx, quoteId);
+    for (const r of open) await notify(tx, await estimatorsOf(tx, r.department), actor.id, facts, 'quote.deleted', { department: r.department, actorName: actor.displayName, text: reason ?? undefined });
+    await event(tx, quoteId, actor.id, `Deleted${reason ? `: ${reason}` : ''}.`);
+    await audit(tx, actor.id, 'quote.deleted', 'quote', quoteId, { reason, status: q.status, withdrew: open });
+  });
+}
+
+/** Puts a deleted quote back where it was, with the requests its deletion withdrew. */
+export async function restoreQuote(db: Database, actor: Account, quoteId: number): Promise<void> {
+  requireSeller(actor);
+  await db.transaction(async (tx) => {
+    const q = (await tx.query<{ deleted_at: string | null; deleted_requests: { id: number; status: RequestStatus }[] | null }>(
+      'SELECT deleted_at, deleted_requests FROM quote.quote WHERE id = $1 FOR UPDATE', [quoteId]))[0];
+    if (!q) throw new HttpError(404, 'No such quote.');
+    if (!q.deleted_at) throw new HttpError(409, 'This quote is not deleted.');
+    for (const r of q.deleted_requests ?? []) await tx.query("UPDATE quote.request SET status = $2 WHERE id = $1 AND status = 'withdrawn'", [r.id, r.status]);
+    await tx.query('UPDATE quote.quote SET deleted_at = NULL, deleted_by = NULL, delete_reason = NULL, deleted_requests = NULL, updated_at = now() WHERE id = $1', [quoteId]);
+    await event(tx, quoteId, actor.id, 'Restored.');
+    await audit(tx, actor.id, 'quote.restored', 'quote', quoteId, { requests: q.deleted_requests ?? [] });
+  });
+}
+
+/** Quotes deleted in the last 90 days, newest first, for restoring. */
+export async function deletedQuotes(db: Queryable): Promise<{ id: number; number: string; revision: number; customerName: string | null; title: string; ownerName: string; deletedAt: string; deletedByName: string | null; deleteReason: string | null }[]> {
+  const rows = await db.query<QuoteRow>(`${QUOTE_SELECT} WHERE q.deleted_at > now() - interval '90 days' ORDER BY q.deleted_at DESC`);
+  return rows.map(toHeader).map((h) => ({ id: h.id, number: h.number, revision: h.revision, customerName: h.customerName, title: h.title, ownerName: h.ownerName, deletedAt: h.deletedAt as string, deletedByName: h.deletedByName, deleteReason: h.deleteReason }));
 }
 
 // ---------------------------------------------------------------- pick lists

@@ -120,4 +120,23 @@ test('from RFQ email to won', async ({ browser }) => {
   await jon.getByLabel('Why is it being reopened?').fill('New quantity of 2,500');
   await jon.getByRole('button', { name: 'Open revision 1' }).click();
   await expect(jon.locator('.qhead .number')).toContainText('rev 1');
+
+  // A stray draft is deleted, the deletion undone, and deleted again.
+  await jon.goto('/');
+  await jon.getByRole('button', { name: 'Start a blank quote' }).click();
+  await expect(jon).toHaveURL(/#\/quotes\/\d+$/);
+  const stray = jon.url();
+  await jon.getByRole('button', { name: 'Delete quote' }).click();
+  await jon.getByLabel('Why? (optional)').fill('Started by mistake');
+  await jon.locator('.dialog').getByRole('button', { name: 'Delete', exact: true }).click();
+  await expect(jon).toHaveURL(/#\/$/);
+  await jon.getByRole('button', { name: 'Undo' }).click();
+  await expect(jon).toHaveURL(stray);
+  await expect(jon.getByRole('button', { name: 'Delete quote' })).toBeVisible();
+  await jon.getByRole('button', { name: 'Delete quote' }).click();
+  await jon.locator('.dialog').getByRole('button', { name: 'Delete', exact: true }).click();
+  await jon.getByRole('link', { name: 'Deleted quotes' }).click();
+  await expect(jon.getByText('Started by mistake')).toHaveCount(0);
+  await expect(jon.locator('table.grid tbody tr')).toHaveCount(1);
 });
+

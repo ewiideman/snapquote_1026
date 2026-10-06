@@ -68,6 +68,10 @@ Read README.md first. This file is the rules and where things stand.
   the part's quantities. A missing price stays missing, never zero, and blocks sending.
 - Nothing entered is deleted: lines and files are removed (`removed_at`), estimates and business
   development's prices superseded or cleared. Every write is in `app.audit_event`.
+  **Quotes are deleted the same way** (Oct 6, 2026; migration 0005): `deleteQuote` sets `deleted_at`,
+  withdraws open requests (kept in `deleted_requests`, put back by `restoreQuote`), emails their
+  estimators (`quote.deleted`); hidden from board, queues and the scheduler exchange; any locked change
+  refuses a deleted quote (409). A won quote is never deleted. Board → Deleted quotes (90 days).
 - Never: connect to the old SnapQuote's database (the migration runner refuses any database not named
   `snapquote_1026*`), write to XA, infer a price or a department, add a default for a business rule
   (markup, terms, validity) — those are settings an administrator enters.

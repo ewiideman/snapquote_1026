@@ -5,7 +5,7 @@ import { departmentName } from '../quoting/departments.ts';
 
 export type NotificationKind =
   | 'request.new' | 'request.reopened' | 'question.asked' | 'question.answered'
-  | 'prices.back' | 'quote.ready' | 'price.changed';
+  | 'prices.back' | 'quote.ready' | 'price.changed' | 'quote.deleted';
 
 interface QuoteFacts { id: number; number: string; revision: number; customer: string | null; title: string; ownerId: string; ownerName: string; customerDueOn: string | null }
 
@@ -41,6 +41,8 @@ export function compose(kind: NotificationKind, q: QuoteFacts, x: { department?:
       return { subject: `${dept} priced ${q.number} ${q.customer ?? ''}`.trim(), body: `${x.actorName} sent ${dept}'s prices for ${label(q)}. Still waiting on other departments.` };
     case 'quote.ready':
       return { subject: `Ready to send: ${label(q)}`, body: `Every department has priced ${q.number}${dept ? ` (${dept} was last)` : ''}. Review the prices and send the customer their copy.${q.customerDueOn ? ` ${q.customer ?? 'The customer'} wants it by ${day(q.customerDueOn)}.` : ''}` };
+    case 'quote.deleted':
+      return { subject: `${q.number} withdrawn: no prices needed from ${dept}`, body: `${x.actorName} deleted ${label(q)}${x.text ? `: ${x.text}` : ''}. It is off ${dept}'s queue; nothing more is needed.` };
     case 'price.changed':
       return { subject: `${dept} changed a price on ${q.number}`, body: `${x.actorName} changed a ${dept} price on ${label(q)} after answering. Check the review page before sending.` };
   }

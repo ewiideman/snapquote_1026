@@ -52,7 +52,7 @@ export async function setFacilities(db: Database, actor: Account, workCell: stri
 /** The quotes the scheduler is told about: with the departments, with the customer, and won lately. */
 export async function exchangeQuotes(db: Queryable): Promise<ExchangeQuote[]> {
   const ids = await db.query<{ id: number }>(
-    `SELECT id FROM quote.quote WHERE status IN ('estimating', 'sent') OR (status = 'won' AND closed_at > now() - make_interval(days => $1)) ORDER BY number`, [WON_DAYS]);
+    `SELECT id FROM quote.quote WHERE deleted_at IS NULL AND (status IN ('estimating', 'sent') OR (status = 'won' AND closed_at > now() - make_interval(days => $1))) ORDER BY number`, [WON_DAYS]);
   const map = await facilityMap(db);
   const out: ExchangeQuote[] = [];
   for (const { id } of ids) {

@@ -6,7 +6,7 @@ import { useRoute } from './lib/router.ts';
 import type { Account, BoardCard, Department, QueueItem } from './lib/types.ts';
 import { AppContext, canSell, Toast, type AppState } from './components/ui.tsx';
 import { SignIn, ChangePassword, AccountPage } from './pages/SignIn.tsx';
-import { Board } from './pages/Board.tsx';
+import { Board, DeletedQuotes } from './pages/Board.tsx';
 import { Queue } from './pages/Queue.tsx';
 import { QuotePage } from './pages/Quote.tsx';
 import { SendPage } from './pages/Send.tsx';
@@ -73,6 +73,7 @@ function App() {
   if (quoteMatch) page = quoteMatch[2] ? <SendPage id={Number(quoteMatch[1])} /> : <QuotePage id={Number(quoteMatch[1])} />;
   else if (path === '/queue' || (path === '/' && !seller)) page = <Queue department={route.query.get('department')} />;
   else if (path === '/settings') page = <Settings />;
+  else if (path === '/deleted') page = <DeletedQuotes />;
   else if (path === '/work-cells') page = <WorkCells />;
   else if (path === '/account') page = <AccountPage account={account} onChanged={(a, said) => { setSession({ account: a, departments: session.departments }); state.toast(said); }} />;
   else page = <Board />;
