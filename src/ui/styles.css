@@ -262,7 +262,7 @@ table.grid .sub { font-size: 12px; color: var(--muted); }
 .scrim { position: fixed; inset: 0; background: rgba(20, 24, 33, 0.32); z-index: 40; }
 .panel { position: fixed; top: 0; right: 0; bottom: 0; width: min(760px, 96vw); background: var(--bg); z-index: 41; box-shadow: var(--shadow); display: flex; flex-direction: column; }
 .panel > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 18px 22px; background: var(--surface); border-bottom: 1px solid var(--line); }
-.panel > .body { flex: 1; overflow: auto; padding: 18px 22px; display: flex; flex-direction: column; gap: 14px; }
+.panel > .body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 18px 22px; display: flex; flex-direction: column; gap: 14px; }
 .panel > footer { display: flex; align-items: center; gap: 10px; padding: 14px 22px; background: var(--surface); border-top: 1px solid var(--line); }
 .dialog { position: fixed; top: 12vh; left: 50%; transform: translateX(-50%); width: min(520px, 94vw); background: var(--surface); border-radius: 10px; z-index: 41; box-shadow: var(--shadow); }
 .dialog > header { padding: 18px 22px 0; }

@@ -26,6 +26,14 @@ test('the Molding calculator prices a part and the mold', async ({ browser }) =>
   await adc.getByRole('button', { name: 'Price it' }).click();
   const panel = adc.locator('.panel');
   await expect(panel.getByText('Choose a resin.')).toBeVisible();
+  // The panel scrolls with the mouse wheel, all the way to its button.
+  const body = panel.locator('.body');
+  expect(await body.evaluate((e) => e.scrollHeight > e.clientHeight)).toBe(true);
+  await body.hover();
+  await adc.mouse.wheel(0, 3000);
+  await expect.poll(() => body.evaluate((e) => e.scrollTop)).toBeGreaterThan(0);
+  await expect(panel.getByRole('button', { name: 'Use this price' })).toBeInViewport();
+  await adc.mouse.wheel(0, -3000);
   await panel.getByLabel('Resin').selectOption('ABS');
   await panel.getByLabel('Annual volume (EAU)').fill('24000');
   await panel.getByLabel('Cavities', { exact: true }).fill('2');
