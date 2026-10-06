@@ -33,6 +33,8 @@ before(async () => {
   await createAccount(db, null, { id: 'jon.whitney', displayName: 'Jon Whitney', role: 'sales', email: 'jon.whitney@mack.com', password: pw, temporary: false });
   await createAccount(db, null, { id: 'metals.est', displayName: 'Metals Estimator', role: 'estimator', department: 'metals', password: pw, temporary: false });
   await createAccount(db, null, { id: 'adc.est', displayName: 'ADC Estimator', role: 'estimator', department: 'molding', password: pw, temporary: false });
+  await createAccount(db, null, { id: 'mach.est', displayName: 'Machining Estimator', role: 'estimator', department: 'machining', password: pw, temporary: false });
+  await createAccount(db, null, { id: 'asm.est', displayName: 'Assembly Estimator', role: 'estimator', department: 'assembly', password: pw, temporary: false });
   await createAccount(db, null, { id: 'buyer', displayName: 'Procurement Buyer', role: 'estimator', department: 'procurement', password: pw, temporary: false });
   server = createApp(db, { storageDir: mkdtempSync(join(tmpdir(), 'sq-files-')), exchangeDir }).listen(0);
   await new Promise((r) => server.once('listening', r));
@@ -312,6 +314,50 @@ test('Molding (ADC) prices a molded part with its calculator: one price at every
   assert.equal(est.oneTimeLabel, 'Mold (domestic)');
   assert.equal(est.detail.calculator, 'molding');
   assert.equal((await adc('POST', `/quotes/${qid}/requests/molding/answer`, {})).status, 200);
+});
+
+test('Machining and Assembly price with their calculators: the workbook example, and labor by the second', async () => {
+  const jon = await session('jon.whitney');
+  const mach = await session('mach.est');
+  const asm = await session('asm.est');
+  const qid = (await jon('POST', '/quotes', {})).body.id as number;
+  await jon('PATCH', `/quotes/${qid}`, { customerName: 'Locus Robotics', quantities: [10, 100] });
+  await jon('PUT', `/quotes/${qid}/lines`, { lines: [
+    { partNumber: 'SHAFT-1', revision: '', description: 'Pivot shaft', qtyPer: 1, notes: '', department: 'machining' },
+    { partNumber: 'ASSY-1', revision: '', description: 'Top assembly', qtyPer: 1, notes: '', department: 'assembly' },
+  ] });
+  assert.equal((await jon('POST', `/quotes/${qid}/send-to-estimating`, {})).status, 200);
+  const [shaft, top] = (await mach('GET', `/quotes/${qid}`)).body.lines;
+
+  const cat = (await mach('GET', '/machining/catalog')).body;
+  assert.equal(cat.machines.length, 9);
+  assert.equal(cat.stock.length, 614);
+  // The workbook example (corrected baseline): $56.051881 each at 10 and $9.388381 at 100.
+  const input = {
+    primaryMachine: 'A20', primaryCycleSec: 70, primarySetupHours: 2, primaryDutyCycle: 0.5, primaryLeadWeeks: 3, operatingShifts: 2,
+    cleaning: true, partsPerCleaningCycle: 500, packaging: 'BULK', partsPerBox: 500, costPerBox: 0.15, perishableToolingPct: 0.06,
+    programmingHours: 1, programmingAmortized: true, programmingLeadWeeks: 1,
+    material: { mode: 'STOCKED', partNumber: 'BR303SS00625042', rawLengthIn: 48.71 / 25.4, remnantIn: 10 },
+    gaging: { cost: 400, amortized: false, leadWeeks: 0 }, inspectionLevel: 'AQL 4.0', inspectionDifficulty: 'B', fai: { required: true, parts: 1, leadWeeks: 0 },
+  };
+  const missing = await mach('POST', `/lines/${shaft.id}/machining`, { input: { ...input, primaryDutyCycle: null } });
+  assert.deepEqual(missing.body.problems, ['Operator time on the machine (0 to 1) is needed.'], 'a blank duty cycle is asked, never taken as 0');
+  assert.equal((await mach('POST', `/lines/${shaft.id}/machining`, { input, save: true })).status, 200);
+  let est = (await mach('GET', `/quotes/${qid}`)).body.lines[0].estimate;
+  assert.deepEqual(est.prices.map((p: any) => [p.quantity, Math.round(p.unitPrice * 1e4) / 1e4]), [[10, 56.0519], [100, 9.3884]]);
+  assert.deepEqual([est.oneTimeCost, est.oneTimeLabel, est.leadTimeWeeks], [400, 'Programming, fixtures and gages', 5]);
+  assert.equal(est.detail.calculator, 'machining');
+  assert.equal((await asm('POST', `/lines/${shaft.id}/machining`, { input, save: true })).status, 403, 'only Machining prices Machining');
+
+  // Assembly: 216 one-minute steps is 3.6 hours, $259.20 at $72; the fixture is a one-time charge.
+  const steps = Array.from({ length: 216 }, () => ({ label: '', assemblySec: 60, testSec: null, qaSec: null }));
+  const r = await asm('POST', `/lines/${top.id}/assembly`, { input: { laborRatePerHour: null, sections: [{ name: 'Top level', partsPerAssembly: 1, steps, equipment: [{ label: 'Fixture', cost: 1500, nre: 250 }] }] }, save: true, leadTimeWeeks: 3 });
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  est = (await asm('GET', `/quotes/${qid}`)).body.lines[1].estimate;
+  assert.deepEqual(est.prices.map((p: any) => [p.quantity, p.unitPrice]), [[10, 259.2], [100, 259.2]]);
+  assert.deepEqual([est.oneTimeCost, est.oneTimeLabel], [1750, 'Equipment and tooling']);
+  const tiny = await asm('POST', `/lines/${top.id}/assembly`, { input: { sections: [{ name: 'Top', partsPerAssembly: 1, steps: [{ assemblySec: 10 }], equipment: [] }] } });
+  assert.match(tiny.body.problems.join(' '), /rounds to 0.00 hours/);
 });
 
 test('signed out, nothing but the session is reachable', async () => {

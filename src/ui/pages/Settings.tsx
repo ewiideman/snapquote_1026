@@ -203,6 +203,65 @@ function MoldingRates() {
   );
 }
 
+function MachiningRates() {
+  const app = useApp();
+  const rows = useAsync(() => get<Ref[]>('/reference/machining'), []);
+  const asm = useAsync(() => get<{ laborRatePerHour: number }>('/assembly/settings'), []);
+  const [tab, setTab] = useState<'machine' | 'stock'>('machine');
+  const [search, setSearch] = useState('');
+  const [error, setError] = useState<unknown>(null);
+  const save = async (r: Ref, data: any, active = r.active) => {
+    setError(null);
+    try { await put(`/reference/machining/${r.kind}/${encodeURIComponent(r.key)}`, { data, active }); rows.reload(); app.toast(`${r.key} saved.`); } catch (err) { setError(err); }
+  };
+  const list = (rows.data ?? []).filter((r) => r.kind === tab).filter((r) => !search || `${r.key} ${r.data.description ?? ''}`.toLowerCase().includes(search.toLowerCase()))
+    .sort((a, b) => (a.data.sortOrder ?? 0) - (b.data.sortOrder ?? 0));
+  return (
+    <div className="section">
+      <header>
+        <h2>Machining and Assembly rates</h2>
+        <div className="row"><div className="seg"><button className={tab === 'machine' ? 'on' : ''} onClick={() => setTab('machine')}>Machines</button><button className={tab === 'stock' ? 'on' : ''} onClick={() => setTab('stock')}>Bar stock</button></div>
+          <input placeholder="Find" value={search} onChange={(e) => setSearch(e.target.value)} /></div>
+      </header>
+      <ErrorBanner error={error} />
+      <div className="body row" style={{ gap: 10 }}>
+        <span>Assembly labor rate ($/hour)</span>
+        {asm.data && <RateInput value={asm.data.laborRatePerHour} prefix="$" onSave={async (v) => {
+          setError(null);
+          try { await put('/reference/assembly/setting/calculation', { data: { laborRatePerHour: v }, active: true }); asm.reload(); app.toast('Assembly labor rate saved.'); } catch (err) { setError(err); }
+        }} />}
+      </div>
+      <div style={{ maxHeight: 520, overflow: 'auto' }}>
+        <table className="grid">
+          <thead>{tab === 'machine'
+            ? <tr><th>Machine</th><th className="right">Rate ($/hour)</th><th>Changed</th><th>In use</th></tr>
+            : <tr><th>Item</th><th>Description</th><th className="right">Bar (ft)</th><th className="right">Cost per bar</th><th>Changed</th><th>In use</th></tr>}</thead>
+          <tbody>
+            {list.map((r) => tab === 'machine' ? (
+              <tr key={r.key}>
+                <td><b>{r.key}</b></td>
+                <td className="right"><RateInput value={r.data.ratePerHour} onSave={(v) => save(r, { ...r.data, ratePerHour: v })} prefix="$" /></td>
+                <td className="muted small">{r.updatedByName ? `${r.updatedByName}, ${ago(r.updatedAt)}` : 'as imported'}</td>
+                <td><input type="checkbox" checked={r.active} onChange={(e) => save(r, r.data, e.target.checked)} /></td>
+              </tr>
+            ) : (
+              <tr key={r.key}>
+                <td className="mono small">{r.key}</td>
+                <td className="small">{r.data.description}</td>
+                <td className="right"><RateInput value={r.data.barLengthFeet} onSave={(v) => save(r, { ...r.data, barLengthFeet: v })} /></td>
+                <td className="right">{!(r.data.costPerBar > 0) && <span className="muted small">no cost </span>}<RateInput value={r.data.costPerBar} onSave={(v) => save(r, { ...r.data, costPerBar: v })} prefix="$" /></td>
+                <td className="muted small">{r.updatedByName ? `${r.updatedByName}, ${ago(r.updatedAt)}` : 'as imported'}</td>
+                <td><input type="checkbox" checked={r.active} onChange={(e) => save(r, r.data, e.target.checked)} /></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="body muted small">Machines, bar stock and the Machining calculator's rates came from the old SnapQuote ("SNAPQUOTE EXCEL TEMPLATE"); Assembly's $72 an hour from its Assembly screen. See docs/machining-assembly-calculators.md.</div>
+    </div>
+  );
+}
+
 function RateInput({ value, onSave, prefix }: { value: number | null; onSave: (v: number) => void; prefix?: string }) {
   const [v, setV] = useState<number | null>(value);
   useEffect(() => setV(value), [value]);
@@ -249,6 +308,7 @@ export function Settings() {
       <SchedulerLink />
       <MetalsRates />
       <MoldingRates />
+      <MachiningRates />
     </div>
   );
 }

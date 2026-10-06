@@ -1,4 +1,4 @@
-// Pricing one part, from the side of the quote page. Metals and Molding (ADC) work it out with their calculators,
+// Pricing one part, from the side of the quote page. Metals, Molding (ADC), Machining and Assembly work it out with their calculators,
 // Procurement from vendor quotes, any department can type its prices. Everyone else sees how it was priced.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { del, get, post, put } from '../lib/api.ts';
@@ -7,14 +7,17 @@ import type { Line, QuoteDetail } from '../lib/types.ts';
 import { canEstimate, ErrorBanner, NumberInput, Panel, useApp } from '../components/ui.tsx';
 import { ago, qty, usd } from '../lib/format.ts';
 import { MoldingCalculator } from './MoldingCalculator.tsx';
+import { MachiningBreakdown, MachiningCalculator } from './MachiningCalculator.tsx';
+import { AssemblyBreakdown, AssemblyCalculator } from './AssemblyCalculator.tsx';
 import { caughtUpWords, loadTone, pct, workCellCapacity, type CapacityRead, type Mapping } from '../lib/capacity.ts';
 
 type Tab = 'calculator' | 'vendors' | 'manual';
+const CALC_NAME: Record<string, string> = { metals: 'Metals', molding: 'Molding', machining: 'Machining', assembly: 'Assembly' };
 
 export function PricePanel({ d, line, onClose, onSaved }: { d: QuoteDetail; line: Line; onClose: () => void; onSaved: () => void }) {
   const app = useApp();
   const mine = d.quote.status === 'estimating' && canEstimate(app.account, line.department);
-  const tabs: Tab[] = mine ? [...(line.department === 'metals' || line.department === 'molding' ? ['calculator' as const] : []), ...(line.department === 'procurement' ? ['vendors' as const] : []), 'manual'] : [];
+  const tabs: Tab[] = mine ? [...(line.department === 'metals' || line.department === 'molding' || line.department === 'machining' || line.department === 'assembly' ? ['calculator' as const] : []), ...(line.department === 'procurement' ? ['vendors' as const] : []), 'manual'] : [];
   const [tab, setTab] = useState<Tab>(() => (line.estimate?.basis === 'manual' ? 'manual' : tabs[0] ?? 'manual'));
   const title = `${line.partNumber || line.description || `Part ${line.position}`}${line.revision ? ` rev ${line.revision}` : ''}`;
   const sub = `${line.description && line.partNumber ? `${line.description} · ` : ''}${app.deptName(line.department)} · ${line.pieceQuantities.map(qty).join(', ')} pieces${line.qtyPer !== 1 && !line.quantities.length ? ` (${qty(line.qtyPer)} per assembly)` : ''}`;
@@ -26,10 +29,10 @@ export function PricePanel({ d, line, onClose, onSaved }: { d: QuoteDetail; line
         <>
           {tabs.length > 1 && (
             <div className="tabs">
-              {tabs.map((t) => <button key={t} className={tab === t ? 'on' : ''} onClick={() => setTab(t)}>{t === 'calculator' ? (line.department === 'molding' ? 'Molding calculator' : 'Metals calculator') : t === 'vendors' ? 'Vendor quotes' : 'Enter prices'}</button>)}
+              {tabs.map((t) => <button key={t} className={tab === t ? 'on' : ''} onClick={() => setTab(t)}>{t === 'calculator' ? `${CALC_NAME[line.department ?? ''] ?? 'Metals'} calculator` : t === 'vendors' ? 'Vendor quotes' : 'Enter prices'}</button>)}
             </div>
           )}
-          {tab === 'calculator' && (line.department === 'molding' ? <MoldingCalculator line={line} onSaved={saved} /> : <MetalsCalculator line={line} onSaved={saved} />)}
+          {tab === 'calculator' && (line.department === 'molding' ? <MoldingCalculator line={line} onSaved={saved} /> : line.department === 'machining' ? <MachiningCalculator line={line} onSaved={saved} /> : line.department === 'assembly' ? <AssemblyCalculator line={line} onSaved={saved} /> : <MetalsCalculator line={line} onSaved={saved} />)}
           {tab === 'vendors' && <VendorQuotes line={line} onSaved={saved} />}
           {tab === 'manual' && <ManualPrices line={line} onSaved={saved} />}
         </>
@@ -42,7 +45,7 @@ export function PricePanel({ d, line, onClose, onSaved }: { d: QuoteDetail; line
 function EstimateSummary({ line }: { line: Line }) {
   const e = line.estimate;
   if (!e) return null;
-  const how = e.basis === 'calculator' ? `with the ${line.department === 'molding' ? 'Molding' : 'Metals'} calculator` : e.basis === 'vendor_quote' ? `from ${e.detail?.supplier ?? 'a vendor'}'s quote` : 'entered by hand';
+  const how = e.basis === 'calculator' ? `with the ${CALC_NAME[line.department ?? ''] ?? 'Metals'} calculator` : e.basis === 'vendor_quote' ? `from ${e.detail?.supplier ?? 'a vendor'}'s quote` : 'entered by hand';
   return (
     <div className="card pad stack" style={{ gap: 8 }}>
       <div className="spread"><b>Current price</b><span className="muted small">{e.enteredByName}, {how}, {ago(e.enteredAt)}</span></div>
@@ -56,7 +59,9 @@ function EstimateSummary({ line }: { line: Line }) {
         {e.notes && <span>{e.notes}</span>}
       </div>
       {e.basis === 'calculator' && e.detail?.calculator === 'molding' && Array.isArray(e.detail?.warnings) && e.detail.warnings.length > 0 && <div className="banner warn">{e.detail.warnings.map((w: string) => <div key={w}>{w}</div>)}</div>}
-      {e.basis === 'calculator' && Array.isArray(e.detail?.breaks) && <MetalsBreakdown breaks={e.detail.breaks} warnings={e.detail.warnings ?? []} />}
+      {e.basis === 'calculator' && e.detail?.calculator === 'machining' && <MachiningBreakdown result={e.detail} />}
+      {e.basis === 'calculator' && e.detail?.calculator === 'assembly' && <AssemblyBreakdown result={e.detail} />}
+      {e.basis === 'calculator' && !e.detail?.calculator && Array.isArray(e.detail?.breaks) && <MetalsBreakdown breaks={e.detail.breaks} warnings={e.detail.warnings ?? []} />}
     </div>
   );
 }

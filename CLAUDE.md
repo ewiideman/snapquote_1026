@@ -49,6 +49,14 @@ Read README.md first. This file is the rules and where things stand.
   presses are reference data (`molding/resin`, `molding/press`); rate ladders are settings defaulting
   to the form's, gaps included (1650 t gets a $94 setup) and said on each price. Questions for ADC
   and what was not ported: `docs/molding-calculator.md`. Do not "fix" the ladders without ADC.
+- **Machining and Assembly calculators** (Oct 6, 2026; `docs/machining-assembly-calculators.md`).
+  Machining (`src/pricing/machining/`): the old "Machined Parts Workbook Baseline" 31 formulas written
+  out, identical to the old engine on 279,000 values; price per quantity = that quantity's costs ÷ it;
+  non-amortized programming/fixtures/gages are the one-time charge; duty cycle is asked, never taken
+  as 0. Machines (9) and bar stock (614) are reference data (`machining/machine`, `machining/stock`).
+  Assembly (`src/pricing/assembly/engine.ts`): labor only, hours rounded to hundredths × rate ($72,
+  `assembly/setting/calculation`), same at every quantity; section equipment is the one-time charge.
+  Routes in `src/server/machiningAssemblyRoutes.ts`. Old oddities kept, listed as questions.
 - Metals engine: `src/pricing/metals/`, ported unchanged from SnapQuote_Master_0626 at 5920baa (MTL07
   model, rate sheet Rev F, 71 sheet-stock items). Its tests carry Mack's own workbook figures (Locus
   37-000542-00 and 37-001746-00, to 4 dp). Known oddities kept as-is and listed in the port report:
@@ -65,8 +73,7 @@ Read README.md first. This file is the rules and where things stand.
   (markup, terms, validity) — those are settings an administrator enters.
 - Ports: 3200 (3000/3003 are the old SnapQuote, 3100 the Production Scheduler, same server).
 - Open: ITAR quotes are flagged but visible to everyone signed in (who may see them is Mack's call);
-  no approval step before sending (add only if Mack asks); the Machining and Assembly calculators;
-  Molding hours to the scheduler (the exchange carries Metals hours only); installing as a Windows
+  no approval step before sending (add only if Mack asks); Molding, Machining and Assembly hours to the scheduler (the exchange carries Metals hours only); installing as a Windows
   service with NSSM like the scheduler (`docs/16` there).
 - Libraries: Express 5, `pg`, exceljs, pdfkit, mailparser, @kenjiuno/msgreader; React + Vite in
   `src/ui`. Node ≥ 22.18 runs TypeScript directly: erasable syntax only, `.ts` import extensions.
