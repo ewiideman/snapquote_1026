@@ -20,7 +20,7 @@ export async function metalsCatalog(db: Queryable): Promise<{ catalog: MetalsCat
 }
 
 /** The line's breaks as the engine wants them: assemblies and parts per assembly, or the part's own quantities. */
-async function lineBreaks(db: Queryable, lineId: number): Promise<{ partNumber: string; description: string; partsPerAssembly: number; breaks: number[]; department: string | null }> {
+export async function lineBreaks(db: Queryable, lineId: number): Promise<{ partNumber: string; description: string; partsPerAssembly: number; breaks: number[]; department: string | null }> {
   const r = (await db.query<{ part_number: string; description: string; qty_per: string; quantities: string[]; department: string | null; quote_quantities: number[] }>(
     'SELECT l.part_number, l.description, l.qty_per, l.quantities, l.department, q.quantities AS quote_quantities FROM quote.line l JOIN quote.quote q ON q.id = l.quote_id WHERE l.id = $1 AND l.removed_at IS NULL', [lineId]))[0];
   if (!r) throw new HttpError(404, 'No such part.');

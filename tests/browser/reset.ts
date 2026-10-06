@@ -15,7 +15,7 @@ const db = createDatabase(config.database);
 await db.exec('DROP SCHEMA IF EXISTS pricing CASCADE; DROP SCHEMA IF EXISTS quote CASCADE; DROP SCHEMA IF EXISTS app CASCADE;');
 await migrate(db);
 await seedReference(db, REFERENCE_SEED);
-for (const [id, name, role, department] of [['jon', 'Jon Whitney', 'sales', null], ['chris', 'Chris Glaski', 'estimator', 'metals'], ['kevin', 'Kevin Bradley', 'estimator', 'procurement']] as const) {
+for (const [id, name, role, department] of [['jon', 'Jon Whitney', 'sales', null], ['chris', 'Chris Glaski', 'estimator', 'metals'], ['kevin', 'Kevin Bradley', 'estimator', 'procurement'], ['adc', 'ADC Estimator', 'estimator', 'molding']] as const) {
   await createAccount(db, null, { id, displayName: name, role, department, email: `${id}@mack.example`, password: PASSWORD, temporary: false });
 }
 await db.close();

@@ -42,8 +42,13 @@ Read README.md first. This file is the rules and where things stand.
   service, no outside API, no CDN at run time. Libraries are npm packages bundled at build.
 - **American English** everywhere: code, comments, screens, docs.
 - **Molding is priced through ADC** (the advanced development center); the screens say "Molding (ADC)".
-  Its calculator (old `src/utils/calc.ts`, press and resin costing) is not ported yet: Molding prices
-  by hand until it is.
+  Its calculator is `src/pricing/molding/` (Oct 6, 2026): ADC's "Tool Development Form" model ported
+  from the old `src/utils/calc.ts` formula for formula, identical to it on 5,000 random parts the day
+  of the port. One price per piece at every quantity (material + press time + setup × 4 a year ÷ EAU),
+  the mold a one-time charge (domestic, China 0.4×, Portugal 0.9×, or ADC's figure). Resins and
+  presses are reference data (`molding/resin`, `molding/press`); rate ladders are settings defaulting
+  to the form's, gaps included (1650 t gets a $94 setup) and said on each price. Questions for ADC
+  and what was not ported: `docs/molding-calculator.md`. Do not "fix" the ladders without ADC.
 - Metals engine: `src/pricing/metals/`, ported unchanged from SnapQuote_Master_0626 at 5920baa (MTL07
   model, rate sheet Rev F, 71 sheet-stock items). Its tests carry Mack's own workbook figures (Locus
   37-000542-00 and 37-001746-00, to 4 dp). Known oddities kept as-is and listed in the port report:
@@ -60,9 +65,9 @@ Read README.md first. This file is the rules and where things stand.
   (markup, terms, validity) — those are settings an administrator enters.
 - Ports: 3200 (3000/3003 are the old SnapQuote, 3100 the Production Scheduler, same server).
 - Open: ITAR quotes are flagged but visible to everyone signed in (who may see them is Mack's call);
-  no approval step before sending (add only if Mack asks); the Molding (ADC), Machining and Assembly
-  calculators (their hours then reach the scheduler too); importing customers and suppliers from the
-  old SnapQuote; installing as a Windows service with NSSM like the scheduler (`docs/16` there).
+  no approval step before sending (add only if Mack asks); the Machining and Assembly calculators;
+  Molding hours to the scheduler (the exchange carries Metals hours only); installing as a Windows
+  service with NSSM like the scheduler (`docs/16` there).
 - Libraries: Express 5, `pg`, exceljs, pdfkit, mailparser, @kenjiuno/msgreader; React + Vite in
   `src/ui`. Node ≥ 22.18 runs TypeScript directly: erasable syntax only, `.ts` import extensions.
   Install with `npm ci --include=dev` (`NODE_ENV=production` may be set).

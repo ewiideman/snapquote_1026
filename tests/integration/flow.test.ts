@@ -32,6 +32,7 @@ before(async () => {
   const pw = 'correct horse';
   await createAccount(db, null, { id: 'jon.whitney', displayName: 'Jon Whitney', role: 'sales', email: 'jon.whitney@mack.com', password: pw, temporary: false });
   await createAccount(db, null, { id: 'metals.est', displayName: 'Metals Estimator', role: 'estimator', department: 'metals', password: pw, temporary: false });
+  await createAccount(db, null, { id: 'adc.est', displayName: 'ADC Estimator', role: 'estimator', department: 'molding', password: pw, temporary: false });
   await createAccount(db, null, { id: 'buyer', displayName: 'Procurement Buyer', role: 'estimator', department: 'procurement', password: pw, temporary: false });
   server = createApp(db, { storageDir: mkdtempSync(join(tmpdir(), 'sq-files-')), exchangeDir }).listen(0);
   await new Promise((r) => server.once('listening', r));
@@ -272,6 +273,45 @@ test('a quote from RFQ email to won', async () => {
   assert.deepEqual(laser.hours, [4.25, 20.25]);
   assert.equal(won.work.find((w: any) => w.workCell === cellB).facilities, null);
   assert.ok(out.quotes.every((x: any) => x.status !== 'draft'), 'drafts are not news for the plant');
+});
+
+test('Molding (ADC) prices a molded part with its calculator: one price at every quantity, the mold once', async () => {
+  const jon = await session('jon.whitney');
+  const adc = await session('adc.est');
+  const qid = (await jon('POST', '/quotes', {})).body.id as number;
+  await jon('PATCH', `/quotes/${qid}`, { customerName: 'Locus Robotics', quantities: [1000, 5000] });
+  assert.equal((await jon('PUT', `/quotes/${qid}/lines`, { lines: [{ partNumber: 'HSG-1', revision: 'A', description: 'Housing', qtyPer: 2, notes: '', department: 'molding' }] })).status, 200);
+  assert.equal((await jon('POST', `/quotes/${qid}/send-to-estimating`, {})).status, 200);
+  const line = (await adc('GET', `/quotes/${qid}`)).body.lines[0];
+  assert.deepEqual(line.pieceQuantities, [2000, 10000]);
+
+  const catalog = (await adc('GET', '/molding/catalog')).body;
+  assert.equal(catalog.resins.length, 46);
+  assert.equal(catalog.presses.length, 53);
+  const input = {
+    resin: 'ABS', pressId: null, eau: 24000, cavitation: 2, cycleTimeSec: 40, partVolumeIn3: 3, wallThicknessIn: 0.1, runnerLengthIn: 6,
+    footprintIn2: 20, moldingPressure: 2.5, flowLengthIn: 5, partLengthIn: 6, partWidthIn: 4, partHeightIn: 2,
+    tool: { steelType: 'P20', moldType: '2 Plate', sideActionQty: 0, gateType: 'Edge Gate', gatesCount: 1, runnerType: 'Cold Runner', ejectionSide: 'Standard', complexity: 2 },
+    tooling: 'domestic',
+  };
+  const missing = await adc('POST', `/lines/${line.id}/molding`, { input: { ...input, eau: null } });
+  assert.deepEqual(missing.body.problems, ['Annual volume (EAU) is needed.']);
+  assert.equal((await adc('POST', `/lines/${line.id}/molding`, { input: { ...input, eau: null }, save: true })).status, 400);
+  const preview = await adc('POST', `/lines/${line.id}/molding`, { input });
+  assert.equal(preview.status, 200, JSON.stringify(preview.body));
+  const res = preview.body.result;
+  assert.equal(res.press.chosen, 'smallest_that_fits');
+  assert.ok(res.perPart > 0 && res.tool.oneTimeUsd > 0);
+  assert.equal((await jon('POST', `/lines/${line.id}/molding`, { input })).status, 200, 'anyone may look; only Molding saves');
+  assert.equal((await jon('POST', `/lines/${line.id}/molding`, { input, save: true })).status, 403);
+  assert.equal((await adc('POST', `/lines/${line.id}/molding`, { input, save: true, leadTimeWeeks: 12 })).status, 200);
+  const est = (await adc('GET', `/quotes/${qid}`)).body.lines[0].estimate;
+  assert.equal(est.basis, 'calculator');
+  assert.deepEqual(est.prices.map((p: any) => [p.quantity, p.unitPrice]), [[2000, res.perPart], [10000, res.perPart]]);
+  assert.equal(est.oneTimeCost, res.tool.oneTimeUsd);
+  assert.equal(est.oneTimeLabel, 'Mold (domestic)');
+  assert.equal(est.detail.calculator, 'molding');
+  assert.equal((await adc('POST', `/quotes/${qid}/requests/molding/answer`, {})).status, 200);
 });
 
 test('signed out, nothing but the session is reachable', async () => {

@@ -20,6 +20,7 @@ import { quoteTerms, referenceRows, setReference } from '../persistence/referenc
 import { quotePdf } from '../quoting/pdf.ts';
 import { DEPARTMENTS, isDepartment } from '../quoting/departments.ts';
 import { metalsRoutes } from './metalsRoutes.ts';
+import { moldingRoutes } from './moldingRoutes.ts';
 import type { ExchangeTimer } from './exchangeTimer.ts';
 import { facilityMap, quoteCapacity, readCapacity, setFacilities } from '../persistence/exchange.ts';
 import { referenceRows as metalsReference } from '../persistence/reference.ts';
@@ -258,6 +259,7 @@ export function createApp(db: Database, options: AppOptions): express.Express {
 
   // ---- metals calculator
   metalsRoutes(api, db, me);
+  moldingRoutes(api, db, me);
 
   // ---- the Production Scheduler
   api.get('/scheduler', (_req, res) => {

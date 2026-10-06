@@ -146,6 +146,58 @@ function MetalsRates() {
   );
 }
 
+function MoldingRates() {
+  const app = useApp();
+  const rows = useAsync(() => get<Ref[]>('/reference/molding'), []);
+  const [tab, setTab] = useState<'resin' | 'press'>('resin');
+  const [search, setSearch] = useState('');
+  const [error, setError] = useState<unknown>(null);
+  const save = async (r: Ref, data: any, active = r.active) => {
+    setError(null);
+    try { await put(`/reference/molding/${r.kind}/${encodeURIComponent(r.key)}`, { data, active }); rows.reload(); app.toast(`${r.key} saved.`); } catch (err) { setError(err); }
+  };
+  const list = (rows.data ?? []).filter((r) => r.kind === tab).filter((r) => !search || `${r.key} ${r.data.plant ?? ''}`.toLowerCase().includes(search.toLowerCase()))
+    .sort((a, b) => (a.data.sortOrder ?? 0) - (b.data.sortOrder ?? 0));
+  return (
+    <div className="section">
+      <header>
+        <h2>Molding (ADC) rates</h2>
+        <div className="row"><div className="seg"><button className={tab === 'resin' ? 'on' : ''} onClick={() => setTab('resin')}>Resins</button><button className={tab === 'press' ? 'on' : ''} onClick={() => setTab('press')}>Presses</button></div>
+          <input placeholder="Find" value={search} onChange={(e) => setSearch(e.target.value)} /></div>
+      </header>
+      <ErrorBanner error={error} />
+      <div style={{ maxHeight: 520, overflow: 'auto' }}>
+        <table className="grid">
+          <thead>{tab === 'resin'
+            ? <tr><th>Resin</th><th className="right">Price ($/lb)</th><th className="right">Density (lb/in³)</th><th>Changed</th><th>In use</th></tr>
+            : <tr><th>Press</th><th>Plant</th><th className="right">Tons</th><th className="right">Barrel (oz)</th><th>Changed</th><th>In use</th></tr>}</thead>
+          <tbody>
+            {list.map((r) => tab === 'resin' ? (
+              <tr key={r.key}>
+                <td><b>{r.key}</b></td>
+                <td className="right">{!(r.data.pricePerLb > 0) && <span className="muted small">no price </span>}<RateInput value={r.data.pricePerLb} onSave={(v) => save(r, { ...r.data, pricePerLb: v })} prefix="$" /></td>
+                <td className="right"><RateInput value={r.data.densityLbPerIn3} onSave={(v) => save(r, { ...r.data, densityLbPerIn3: v })} /></td>
+                <td className="muted small">{r.updatedByName ? `${r.updatedByName}, ${ago(r.updatedAt)}` : 'as imported'}</td>
+                <td><input type="checkbox" checked={r.active} onChange={(e) => save(r, r.data, e.target.checked)} /></td>
+              </tr>
+            ) : (
+              <tr key={r.key}>
+                <td className="mono small">{r.key}</td>
+                <td className="small">{r.data.plant}</td>
+                <td className="right"><RateInput value={r.data.tons} onSave={(v) => save(r, { ...r.data, tons: v })} /></td>
+                <td className="right"><RateInput value={r.data.barrelOz} onSave={(v) => save(r, { ...r.data, barrelOz: v })} /></td>
+                <td className="muted small">{r.updatedByName ? `${r.updatedByName}, ${ago(r.updatedAt)}` : 'as imported'}</td>
+                <td><input type="checkbox" checked={r.active} onChange={(e) => save(r, r.data, e.target.checked)} /></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="body muted small">Resins and presses came from the old SnapQuote (ADC's Tool Development Form, press list of Mar 21, 2025). The hourly press rates and setup costs by tonnage are the form's; see docs/molding-calculator.md. Changes apply to prices worked out from now on.</div>
+    </div>
+  );
+}
+
 function RateInput({ value, onSave, prefix }: { value: number | null; onSave: (v: number) => void; prefix?: string }) {
   const [v, setV] = useState<number | null>(value);
   useEffect(() => setV(value), [value]);
@@ -191,6 +243,7 @@ export function Settings() {
       <Terms />
       <SchedulerLink />
       <MetalsRates />
+      <MoldingRates />
     </div>
   );
 }
