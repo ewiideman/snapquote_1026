@@ -6,6 +6,7 @@ import type { Account } from './accounts.ts';
 import { audit, HttpError } from './util.ts';
 import { estimatorsOf, notify, quoteFacts } from './notify.ts';
 import { DEPARTMENTS, departmentName, isDepartment, type DepartmentKey } from '../quoting/departments.ts';
+import { emailDomainOf } from '../quoting/email-domain.ts';
 import {
   buildSheet, lineQuantities, qtyKey, sendToEstimatingProblems, stageOf, waitingOn,
   type PricedLine, type QuoteStatus, type RequestStatus, type Sheet, type Stage,
@@ -328,11 +329,7 @@ export async function customerByName(db: Queryable, name: string): Promise<numbe
   return rows[0]?.id as number;
 }
 
-const GENERIC_DOMAINS = new Set(['gmail.com', 'yahoo.com', 'outlook.com', 'hotmail.com', 'aol.com', 'icloud.com', 'live.com', 'msn.com', 'comcast.net', 'mack.com']);
-export const emailDomain = (email: string | null | undefined): string | null => {
-  const d = email?.split('@')[1]?.trim().toLowerCase();
-  return d && !GENERIC_DOMAINS.has(d) ? d : null;
-};
+export const emailDomain = emailDomainOf;
 
 export async function customerForEmail(db: Queryable, email: string | null): Promise<{ id: number; name: string } | null> {
   const domain = emailDomain(email);

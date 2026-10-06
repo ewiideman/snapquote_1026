@@ -70,6 +70,8 @@ The first administrator adds everyone else under Settings. Roles: **Business dev
 **Estimator** (one department's prices), **Manager** (both, every department), **Administrator** (also
 people, rates and the terms printed on quotes).
 
+Customers and suppliers from the old SnapQuote: `docs/import-from-old-snapquote.md`.
+
 ## Check it
 
 ```bash

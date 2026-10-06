@@ -30,6 +30,14 @@ Read README.md first. This file is the rules and where things stand.
   `SMTP_HOST`/`APP_URL`; never to the actor; skipped without an address or with
   `email_notifications` off, set by each person on their account page). Quote page shows whether
   changes are saved; revise/reopen and temporary passwords use dialogs, not browser prompts.
+- State (2026-10-06, directory): **customers and suppliers come over from the old SnapQuote by CSV**
+  (`docs/import-from-old-snapquote.md`): read-only `psql \copy` on the server, then
+  `npm run import:directory -- --customers ... --suppliers ... [--apply]` (dry run by default).
+  `src/quoting/directory.ts` (pure: one entry per name ignoring case and spacing, every old row kept,
+  customer email domains unless shared or already a customer's, near-duplicates such as "Inc" vs none
+  named and never merged), `src/persistence/directory.ts` (one transaction, audit `directory.imported`).
+  Migration 0004: `imported jsonb` on `quote.customer` and `quote.supplier` holds the old rows as
+  exported. `emailDomainOf` (`src/quoting/email-domain.ts`) is the one domain rule.
 - **On-prem only. Period.** The app, PostgreSQL and attached files run on Mack's server. No cloud
   service, no outside API, no CDN at run time. Libraries are npm packages bundled at build.
 - **American English** everywhere: code, comments, screens, docs.
