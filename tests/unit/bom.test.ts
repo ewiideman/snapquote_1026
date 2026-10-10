@@ -447,3 +447,49 @@ test('sections on one sheet with their own headers are all read', () => {
     ['3', '4100-1010', 'B', 'Chassis, base', '1', 'CRS 16 ga'], ['4', '4100-2010', 'C', 'Bracket', '2', '5052 .080']] }]);
   assert.deepEqual(r.lines.map((l) => [l.partNumber, l.revision, l.qtyPer]), [['HW-0632-0375', '', 22], ['EL-FAN-80', '', 2], ['4100-1010', 'B', 1], ['4100-2010', 'C', 2]]);
 });
+
+// Sixth review (Oct 10): generator sweeps of CAD/PLM/ERP exports, OEM quote forms and electrical BOMs.
+
+test('a CAD list with no part-number column keeps its items apart by item number when descriptions repeat', () => {
+  const r = proposeLines([{ name: 'BOM', rows: [['ITEM NO.', 'DESCRIPTION', 'QTY.'], [1, 'BASE PLATE', 1], [2, 'BRACKET', 2], [3, 'BRACKET', 2], [4, 'Hex Nut', 8]] }]);
+  assert.deepEqual(r.lines.map((l) => [l.partNumber, l.description]), [['1', 'BASE PLATE'], ['2', 'BRACKET'], ['3', 'BRACKET'], ['4', 'Hex Nut']]);
+  const distinct = proposeLines([{ name: 'BOM', rows: [['ITEM NO.', 'DESCRIPTION', 'QTY.'], [1, 'BASE PLATE', 1], [2, 'BRACKET', 2]] }]);
+  assert.deepEqual(distinct.lines.map((l) => l.partNumber), ['', '']);
+});
+
+test("an OrCAD BOM's values describe the lines that have no manufacturer's number", () => {
+  const r = proposeLines([{ name: 'BOM', rows: [['Item', 'Quantity', 'Reference', 'Part', 'MPN'], [1, 2, 'C1,C2', '0.1uF', ''], [2, 1, 'C3', '10uF', 'GRM21BR61E106KA73L'], [3, 4, 'R1-R4', '10K', '']] }]);
+  assert.deepEqual(r.lines.map((l) => [l.partNumber, l.description]), [['', '0.1uF'], ['GRM21BR61E106KA73L', '10uF'], ['', '10K']]);
+});
+
+test("a board's or harness's number and revision are the parent's, not the line's", () => {
+  const r = proposeLines([{ name: 'BOM', rows: [['CCA P/N', 'Board Rev', 'Ref Des', 'Qty', 'Description', 'Manufacturer', 'Manufacturers Part Number'],
+    ['500-1001', 'C', 'C1,C2', 2, 'CAP 0.1UF', 'Murata', 'GRM188R71H104KA93D'], ['500-1001', 'C', 'R1', 1, 'RES 10K', 'Yageo', 'RC0603FR-0710KL']] }]);
+  assert.deepEqual(r.lines.map((l) => [l.partNumber, l.revision]), [['GRM188R71H104KA93D', ''], ['RC0603FR-0710KL', '']]);
+});
+
+test("Drawing No. gives way to the customer's own number; a beside title block's labels never do", () => {
+  const pns = (rows: unknown[][]) => proposeLines([{ name: 'S', rows }]).lines.map((l) => l.partNumber);
+  assert.deepEqual(pns([['Line', 'Dwg No.', 'Customer P/N', 'Description', 'Qty'], [1, '4100-1010', '4100-1010-01', 'BRACKET, LH', 1], [2, '4100-1010', '4100-1010-02', 'BRACKET, RH', 1], [3, '', 'HW-0632', 'SCREW', 4]]),
+    ['4100-1010-01', '4100-1010-02', 'HW-0632']);
+  assert.deepEqual(pns([['Line', 'Item', 'Description', 'Drawing #', 'Mfr Part Number', '', 'Customer P/N', '1077-077-720'], ['', '', '', '', '', '', 'Customer Rev', 'C'],
+    [1, '3768-770-279', 'PLATE, BASE', '3768-770-279', '', '', 'Description', 'PUMP HOUSING'], [2, '3768-788-509', 'WASHER, FLAT #8', '', '24333', '', 'Email', 'buyer@example.com'],
+    [3, '3768-783-391', 'WASHER, FLAT #8', '', 'S-440-4', '', 'Due Date', '10/15/2026']]), ['3768-770-279', '3768-788-509', '3768-783-391']);
+});
+
+test("sections with two-row headings: each section keeps the customer's column", () => {
+  const head = ['#', 'KIDDE PART NO:', 'NAME', 'MFR', 'MFR P/N', 100, 250, 'UNIT PRICE'];
+  const top = ['', '', '', '', '', 'PRICE PER PIECE @ QTY', 'PRICE PER PIECE @ QTY', ''];
+  const r = proposeLines([{ name: 'S', rows: [['PURCHASED PARTS'], top, head, [1, '600-2185', 'O-RING', 'Penn', 'SO-M3-11'], [2, '81.8360.12', 'CABLE TIE', 'E-Switch', 'RA1113113R-52'], [],
+    ['HARDWARE'], top, head, [3, '81.8353.18', 'SCREW, FLAT HD', 'Penn', 'SO-M3-17-19'], ['', 'TOTAL:', '', '', '', '', '', 0]] }]);
+  assert.deepEqual(r.lines.map((l) => l.partNumber), ['600-2185', '81.8360.12', '81.8353.18']);
+  const molded = proposeLines([{ name: 'S', rows: [['', 'HARDWARE'], ['', 'ACME PART #', 'DESC.', 'MFR', 'MFR P/N', 'QTY / ASSY'], ['', '5000-6642', 'INSERT', 'Sunon', 'EE80251S1', 1],
+    ['', 'MOLDED PARTS'], ['', 'ACME PART #', 'DESC.', 'REV:', 'QTY / ASSY', 'MFR', 'MFR P/N'], ['', 'P00459-20', 'HOUSING, REAR', 4, 2]] }]);
+  assert.deepEqual(molded.lines.map((l) => [l.partNumber, l.revision]), [['5000-6642', ''], ['P00459-20', '4']]);
+});
+
+test('a one-column tooling table under the form does not outrank the form', () => {
+  const r = proposeLines([{ name: 'Quote Form', rows: [['SEQ', 'ARROW PART #', 'REVISION', 'DESCRIPTION:', 'PRICE @ 100'], [1, 1158693, 4, 'COVER'], [2, 'HW-7557', '', 'GASKET, FOAM'], [3, 1158691, '', 'MAGNET'],
+    [], ['TOOLING'], ['Item', 'Tooling Description', 'Cavitation', 'Cost'], [1, 'Family mold', 4], [2, 'Bezel mold', 2]] }]);
+  assert.deepEqual(r.lines.slice(0, 3).map((l) => l.description), ['COVER', 'GASKET, FOAM', 'MAGNET']);
+});

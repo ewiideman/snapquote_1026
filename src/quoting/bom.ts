@@ -40,19 +40,23 @@ type Field = 'partNumber' | 'revision' | 'description' | 'qtyPer' | 'material' |
 // - 2.6: "Item", "Item No.", "Item Number", "Item ID", unless its values are mostly find numbers counting up
 //   from 100 or less (1, 2, 1.1, 10, 2A); an Item Number beside the sheet's own find or line column never is;
 // - 2.5: the manufacturer's: "Mfr P/N", "Manufacturer Part Number", "MPN";
-// - 1.75: any other name before P/N, as a customer's own form heads its number ("KPD P/N", "Boston
-//   Scientific P/N"), so it is used when nothing above is there;
+// - 1.75: any other name before P/N or Item #, as a customer's own form heads its number ("KPD P/N",
+//   "Boston Scientific P/N", "Bruker Item #"), so it is used when nothing above is there;
 // - 1.5: an approved or preferred manufacturer's; 1: "No.", unless its values are find numbers.
 // A heading naming another part or party is never a part number: a parent or assembly, a distributor or
-// vendor, a substitute or old number, material, tooling or packaging, "Your P/N", "Mack P/N".
-// The strongest part-number column with values is used, except that a manufacturer's number gives way to
-// a lower one (1.75 or more) filled on more rows, mostly with different values, and on most of the rows
-// the MPN is (a customer's numbering covers made and bought parts; a parent repeats down the rows), and
-// find numbers are used only when the rows have no description to tell them apart.
+// vendor, a substitute or old number, material, tooling or packaging, "Your P/N", "Mack P/N"; nor is a
+// board's or harness's number ("CCA P/N"), nor a column holding a title block's labels.
+// The strongest part-number column with values is used, except that a manufacturer's or drawing number
+// gives way to a lower one (1.75 or more) filled on as many rows, mostly with different values that are
+// numbers, and on most of the rows it is (a customer's numbering covers made and bought parts and each
+// dash number; a parent repeats down the rows). Find numbers are used only where nothing else tells the
+// rows apart: no part-number column and descriptions blank or repeated under one parent. An electrical
+// BOM's Part holding values, when not the part number, describes the line if nothing else does.
 // Revision: "Part Rev", "Component Rev", "Item Rev" (3.25); "Rev", "Revision", "Rev Level", "Rev #" (3);
 // "Dwg Rev", "Customer Rev" (2.75); another word before Rev (1.75), unless it names another document or
 // part ("BOM Rev", "From Rev"); and in a PLM export, "Version" (2), read as revision.iteration ("C.1" is
-// revision C) and kept in the notes. Other fields: the strongest column with values.
+// revision C) and kept in the notes; never a board's, harness's or cable's ("Board Rev"). Other fields:
+// the strongest column with values.
 const NUM = String.raw`(no\.?|nbr\.?|num(ber|\.)?|#|id)`;
 const PN = String.raw`(p\/?n\.?\s*#?|p\.\s*n\.?|p\/no\.?|part\s*${NUM})`;
 const REV = String.raw`rev(\.|ision)?\s*(level|lvl\.?|letter|${NUM})?`;
@@ -62,11 +66,14 @@ const PART_PN = new RegExp(String.raw`^((customer|cust\.?)\s*)?(part|component)\
 const DRAWING_PN = new RegExp(String.raw`^((customer|cust\.?)\s*)?(dwg|drawing)\s*(${NUM}|p\/?n)?$`);
 const CUSTOMER_PN = new RegExp(String.raw`^(cpn|company\s*${PN}|([a-z]+\s+)?12\s*nc)$`);
 const NAMED_PN = new RegExp(String.raw`^(${WORD}(\s+(&\s+)?${WORD}){0,2})\s+${PN}$`, 'u');
+// The customer's number as its ERP calls the part an item: "Bruker Item #", "Hologic Item No." (never the
+// sheet's own find or line column, "Line Item #").
+const NAMED_ITEM = new RegExp(String.raw`^(${WORD}(\s+(&\s+)?${WORD}){0,2})\s+item\s*${NUM}$`, 'u');
 const MFR_PN = /^((approved|preferred)\s+)?(mfr|mfg|mfgr|manuf|manufacturer)('?s|\.)?\s*(part|#)$|^mpn$/;
 const ITEM_PN = new RegExp(String.raw`^((customer|cust\.?)\s*)?item\s*${NUM}?$`);
 const BARE_REV = new RegExp(String.raw`^${REV}$`);
 const NAMED_REV = new RegExp(String.raw`^(${WORD})\s+${REV}$`, 'u');
-const DESCRIPTION = /^((part|item|component|object)\s*)?(desc(\.|ription)?|name|title)$|^short text$/;
+const DESCRIPTION = /^((part|item|component|object)\s*)?(desc(\.|ription)?|name|title)$|^short text$|^nomenclature( (or|\/) description)?$|^part name\s*\/\s*description$/;
 const QTY_PER = /^(qty|quantity)(\s*(per|\/)\s*(assy|assembly|unit|ea))?\.?$|^(qty|quantity)\s*per$|^usage$|^per$/;
 
 const CUSTOMER_WORDS = new Set(['customer', 'cust', 'buyer', 'oem', 'client', 'purchaser', 'our', 'internal']);
@@ -97,7 +104,7 @@ const NO_CONTEXT: Context = { plm: false, electrical: false, sap: false };
  * `item`: may hold find numbers; `mfr`: a manufacturer's number, which made parts do not have; `value`: an
  * electrical BOM's Part, which may hold the component's value (10K, 0.1uF) rather than a number.
  */
-type Hit = { field: Field; strength: number; kind?: 'item' | 'mfr' | 'value' };
+type Hit = { field: Field; strength: number; kind?: 'item' | 'mfr' | 'value' | 'dwg' };
 
 function classify(text: string, ctx: Context): Hit | null {
   let m: RegExpExecArray | null;
@@ -106,7 +113,7 @@ function classify(text: string, ctx: Context): Hit | null {
   if (COMPONENT_PN.test(text)) return pn(3.25);
   if (text === 'part') return ctx.electrical ? pn(2.9, 'value') : pn(2.9);
   if (PART_PN.test(text)) return pn(3);
-  if (DRAWING_PN.test(text)) return pn(2.9);
+  if (DRAWING_PN.test(text)) return pn(2.9, 'dwg');
   if (CUSTOMER_PN.test(text)) return pn(2.75);
   if ((m = NAMED_PN.exec(text))) {
     const words = (m[1] ?? '').split(/\s+/).filter((w) => w !== '&');
@@ -118,6 +125,11 @@ function classify(text: string, ctx: Context): Hit | null {
   if (text === 'number' && ctx.plm) return pn(2.75);
   if ((m = MFR_PN.exec(text))) return pn(m[1] ? 1.5 : 2.5, 'mfr');
   if (ITEM_PN.test(text)) return pn(2.6, 'item');
+  if ((m = NAMED_ITEM.exec(text)) && !FIND_HEADING.test(text)) {
+    const words = (m[1] ?? '').split(/\s+/).filter((w) => w !== '&');
+    if (words.some(refused) || words.some((w) => /^(line|find|po|order|quote|rfq|sales|catalog|stock)$/.test(first(w)))) return null;
+    return pn(CUSTOMER_WORDS.has(first(words[0] ?? '')) ? 2.75 : 1.75, 'item');
+  }
   if (text === 'no.') return pn(1, 'item');
   if (text === 'material' && ctx.sap) return pn(2.9);
   if (BARE_REV.test(text)) return rev(3);
@@ -191,6 +203,12 @@ const isHeaderLike = (f: Map<Field, Candidate[]>): boolean => f.size >= 2 && (f.
 const holdsPart = (row: readonly unknown[] | undefined, table: Map<Field, Candidate[]>): boolean =>
   (table.get('partNumber') ?? []).some((c) => { const t = cellText(row, c.col); return /\d/.test(t) && !classifyHeading(heading(t), NO_CONTEXT); });
 
+/** A header row whose known headings all lie right of the table's columns: a block beside it (revision history, tooling). */
+const beside = (h: Map<Field, Candidate[]>, table: Map<Field, Candidate[]>): boolean => {
+  const last = Math.max(...[...table.values()].flat().map((c) => c.col));
+  return [...h.values()].flat().every((c) => c.col > last);
+};
+
 /** Two heading rows read as one: "Part" over "No." is "Part No."; a merged cell repeated into both is read once. */
 const stacked = (top: readonly unknown[], bottom: readonly unknown[]): string[] =>
   Array.from({ length: Math.max(top.length, bottom.length) }, (_, c) => {
@@ -209,7 +227,9 @@ function titleBlockRow(rows: readonly (readonly unknown[])[], r: number): boolea
   if (labels.length < 2 || !labels.every((c) => !!texts[c + 1] && !known[c + 1])) return false;
   if (!labels.some((c) => /\d/.test(texts[c + 1] ?? ''))) return false;
   let n = r + 1;
-  while (n < rows.length && new Set((rows[n] ?? []).map(norm).filter(Boolean)).size <= 1) n++;
+  // A units row under a header ("(ea)", "(USD)") is passed over too: the first row of values decides.
+  const units = (row: readonly unknown[] | undefined) => { const v = (row ?? []).map(norm).filter(Boolean); return v.length > 0 && v.every((t) => /^\(.*\)$/.test(t)); };
+  while (n < rows.length && (new Set((rows[n] ?? []).map(norm).filter(Boolean)).size <= 1 || units(rows[n]))) n++;
   // With nothing but one-value lines under it, it is a title block, unless two or more of them are
   // numbers down a label's column ("Part Number" over 4100-1010, 4100-1011): that is a table. A note has words.
   if (n >= rows.length) return !labels.some((c) => /\s/.test(texts[c + 1] ?? '') && rows.slice(r + 1).filter((row) => /^\S*\d\S*$/.test(norm(row[c]))).length >= 2);
@@ -223,7 +243,10 @@ const FIND_NUMBER = /^\d{1,4}(\.\d{1,2})*[A-Za-z]?$/;
 const FIND_HEADING = /^(find|line|balloon|pos(ition)?)[\s.-]*(item[\s.-]*)?((no|nr|nbr|num(ber)?|#|id|seq(uence)?)\.?)?$|^item\s*#?$/;
 // A component's value in an electrical BOM: 10K, 0.1uF, 4.7nF, 4K7, 0R, DNP, and bare numbers of three
 // significant digits (100, 4700, 49.9), never a part number such as 300042.
-const COMPONENT_VALUE = /^((0|[1-9]\d{0,2}0*)(\.\d+)?|\d+(\.\d+)?\s*((p|n|u|µ|m|k|meg|g)\s*(f|h|ohms?|Ω|r|v|w|a|hz|%)?|(f|h|ohms?|Ω|r|v|w|a|hz|%))|\d+[rkmunp]\d+|dnp|nc)$/i;
+// A bare value has at most three significant digits (49.9, 0.022, 4700); before a unit, up to three digits
+// then any decimals (32.768kHz). Never 36.6642, 300042A or 123456R: those are part numbers.
+const SIG3 = String.raw`(0(\.0*[1-9]\d{0,2})?|[1-9]\d{0,2}0*(\.0+)?|[1-9]\.\d{1,2}|[1-9]\d\.\d)`;
+const COMPONENT_VALUE = new RegExp(String.raw`^(${SIG3}|(${SIG3}|\d{1,3}\.\d+)\s*((p|n|u|µ|m|k|meg|g)\s*(f|h|ohms?|Ω|r|v|w|a|hz|%)?|(f|h|ohms?|Ω|r|v|w|a|hz|%))|\d+[rkmunp]\d+|dnp|nc)$`, 'i');
 // A sum line, as a quote form's part number or description: "TOTAL", "Totals:", "Subtotal", "Grand Total
 // (USD)", "Total tooling", "TOTAL OF ... PER ASSEMBLY", "Order total", "Sum".
 const SUM_LABEL = /^((sub|grand)[\s-]*)?totals?\s*((of|per|for)\b.*|(cost|costs|price|prices|amount|value|qty|quantity|tooling|nre|usd|each|ea|\$)\s*(\(.*\))?)?\s*:?$|^[a-z][a-z -]{0,30}\s+totals?\s*(\(.*\))?\s*:?$|^sum\s*:?$/i;
@@ -260,6 +283,9 @@ export function proposeLines(sheets: readonly { name: string; rows: Rows }[]): B
         const heads = row.filter((v, c) => {
           const top = norm(v);
           if (!top || !norm(below[c]) || /\d/.test(top)) return false;
+          // A title block's label ("Prepared By:") or the value after it ("J. Smith") heads no column, unless merged down into it.
+          const label = (k: number) => /:$/.test(String(row[k] ?? '').trim());
+          if ((label(c) || (c > 0 && label(c - 1))) && top !== norm(below[c])) return false;
           const lo = lower[c], st = stackedHits[c];
           if (!lo || (st && st.field === lo.field && st.strength >= lo.strength)) return true;
           return !/\s/.test(heading(v)) && refused(heading(v));
@@ -274,13 +300,34 @@ export function proposeLines(sheets: readonly { name: string; rows: Rows }[]): B
         // number or description.
         const cols = [...(o.fields.get('partNumber') ?? []), ...(o.fields.get('description') ?? [])].map((c) => c.col);
         let data = 0;
+        const window: (readonly unknown[])[] = [];
+        const pnCols = (o.fields.get('partNumber') ?? []).map((c) => c.col);
+        const others = [...o.fields].flatMap(([f, list]) => (f === 'revision' || f === 'description' || f === 'qtyPer' ? list.map((c) => c.col) : [])).filter((c) => !pnCols.includes(c));
         for (let i = o.last + 1; i < Math.min(s.rows.length, o.last + 30); i++) {
-          if (isHeaderLike(single[i] ?? NO_FIELDS) && !holdsPart(s.rows[i], o.fields)) break;
+          if (isHeaderLike(single[i] ?? NO_FIELDS) && !beside(single[i] ?? NO_FIELDS, o.fields) && !holdsPart(s.rows[i], o.fields)) break;
           if (cols.some((c) => cellText(s.rows[i], c))) data++;
+          window.push(s.rows[i] ?? []);
         }
-        // Rows under it first, then more known columns, then one naming a part number, then a description;
+        // Rows of the table under it: a part number with another value (alone when its revision, description
+        // and quantity are empty throughout), or, with no part number, a description and another field.
+        const pnOf = o.fields.get('partNumber') ?? [];
+        const usedOthers = others.filter((c) => window.some((row) => cellText(row, c)));
+        const span = Math.max(...[...o.fields.values()].flat().map((c) => c.col));
+        const values = (row: readonly unknown[]) => new Set(row.slice(0, span + 1).map(norm).filter(Boolean)).size;
+        const tableRow = (row: readonly unknown[]) => holdsPart(row, o.fields)
+          ? usedOthers.length === 0 || usedOthers.some((c) => cellText(row, c)) || values(row) >= 2
+          : pnOf.every((c) => !cellText(row, c.col)) && o.fields.has('description') && [...o.fields].filter(([, list]) => list.some((c) => cellText(row, c.col))).length >= 2;
+        // Counted down to the first other row with two values within its columns (a title block's next block
+        // is not its table; a banner, a note or a block beside the table is passed over).
+        let tableRows = 0;
+        for (const row of window) {
+          if (tableRow(row)) tableRows++;
+          else if (tableRows > 0 && values(row) >= 2) break;
+        }
+        // Rows under it first, then two or more rows of the table under a header naming two or more columns (a
+        // title block has one row of values, a column guide prose), then more known columns, then one naming a part number, then a description;
         // the earlier row on a tie.
-        const rank = (data > 0 ? 1000 : 0) + o.fields.size * 4 + (o.fields.has('partNumber') ? 2 : 0) + (o.fields.has('description') ? 1 : 0);
+        const rank = (data > 0 ? 1000 : 0) + (tableRows >= 2 && isHeaderLike(o.fields) ? 500 : 0) + o.fields.size * 4 + (o.fields.has('partNumber') ? 2 : 0) + (o.fields.has('description') ? 1 : 0);
         const h: Header = { sheet: s.name, top: r, headerRow: o.last, fields: o.fields, texts: o.texts, rows: s.rows, rank, data };
         headers.push(h);
         if (!best || rank > best.rank) best = h;
@@ -291,7 +338,7 @@ export function proposeLines(sheets: readonly { name: string; rows: Rows }[]): B
   // The parts start at the first table on that sheet with a part-number column and parts under it above
   // the best header (purchased parts above fabricated ones); later tables are read in turn.
   const chosen = best as Header;
-  const start = headers.find((h) => h.rows === chosen.rows && h.headerRow < chosen.top && isHeaderLike(h.fields) && h.fields.has('partNumber')
+  const start = headers.find((h) => h.rows === chosen.rows && h.headerRow < chosen.top && h.data > 0 && isHeaderLike(h.fields) && h.fields.has('partNumber')
     && h.rows.slice(h.headerRow + 1, chosen.top).some((row) => holdsPart(row, h.fields))
     && !headers.some((o) => o.rows === h.rows && o.headerRow === h.headerRow && o.rank > h.rank)) ?? chosen;
   const { sheet, headerRow, fields, texts, rows } = start;
@@ -309,36 +356,102 @@ const sameColumns = (a: Map<Field, Candidate[]>, b: Map<Field, Candidate[]>): bo
  */
 function readTable(rows: Rows, headerRow: number, candidates: Map<Field, Candidate[]>, texts: string[]): ProposedLine[] {
   let end = rows.length;
+  let next: { headerRow: number; fields: Map<Field, Candidate[]>; texts: string[] } | null = null;
+  const words = (t: readonly string[]) => { const w = [...t]; while (w.length && !w[w.length - 1]) w.pop(); return w.join('|'); };
+  const repeats = (both: string[]) => words(both.map(heading)) === words(texts);
+  // A row of this table: a description under its description column that is not a heading.
+  const describes = (row: readonly unknown[] | undefined) => (candidates.get('description') ?? []).some((c) => { const t = cellText(row, c.col); return !!t && !classifyHeading(heading(t), NO_CONTEXT); });
   for (let j = headerRow + 1; j < rows.length; j++) {
     const h = headerCandidates(rows[j] ?? []);
-    if (isHeaderLike(h) && (h.size >= candidates.size || h.has('partNumber')) && !sameColumns(h, candidates) && !holdsPart(rows[j], candidates) && !titleBlockRow(rows, j)) { end = j; break; }
+    // The lower row of a repeated two-row header ("Part" over "Number" again after a section title) is part
+    // of the repeat, not a new table.
+    if (j > headerRow + 1 && repeats(stacked(rows[j - 1] ?? [], rows[j] ?? []))) continue;
+    if (nonBlank(rows[j + 1]) && repeats(stacked(rows[j] ?? [], rows[j + 1] ?? []))) { j++; continue; }
+    // A later header naming only part-number columns ("Customer Part No. | Nomenclature | Mfr | Mfr P/N")
+    // starts a table too when it repeats the part-number heading over the table's own column.
+    const repeatsPn = j > headerRow + 1 && h.has('partNumber') && headingHits(rows[j] ?? []).filter(Boolean).length >= 2
+      && (candidates.get('partNumber') ?? []).some((c) => classifyHeading(heading(cellText(rows[j], c.col)), NO_CONTEXT)?.field === 'partNumber');
+    if ((isHeaderLike(h) || repeatsPn) && (h.size >= candidates.size || h.has('partNumber')) && !sameColumns(h, candidates) && !(holdsPart(rows[j], candidates) && (beside(h, candidates) || describes(rows[j]) || h.size <= candidates.size)) && !titleBlockRow(rows, j)) {
+      // A two-row heading ("QTY" over "100"): the upper row belongs to the next table, read as one with it.
+      const up = rows[j - 1];
+      const both = stacked(up ?? [], rows[j] ?? []);
+      const stackedFields = j - 1 > headerRow && nonBlank(up) && !holdsPart(up, candidates) ? headerCandidates(both) : NO_FIELDS;
+      // Read as one only when that keeps every column the lower row names, as strongly ("MOLDED PARTS" over
+      // "Briggs & Stratton Part #" or over "P/N" does not).
+      const keeps = [...h].every(([f, list]) => list.every((c) => stackedFields.get(f)?.some((k) => k.col === c.col && k.strength >= c.strength)));
+      end = stackedFields.size >= h.size ? j - 1 : j;
+      next = keeps && stackedFields.size >= h.size ? { headerRow: j, fields: stackedFields, texts: both.map(heading) } : { headerRow: j, fields: h, texts: (rows[j] ?? []).map(heading) };
+      break;
+    }
   }
   const body = rows.slice(headerRow + 1, end);
   const column = (c: number) => body.map((row) => cellText(row, c)).filter(Boolean);
   const filled = (c: number) => column(c).length;
+  // Mostly headings or labels ("Rev", "Description:") on the rows with a part number in another part-number
+  // column: a title block beside the table, not its values. A repeated header, a signature line, a note or
+  // a summary under the table ("Component Count: 13") is not one of those rows.
+  const isLabel = (v: string) => /:\s*$/.test(v) || !!classifyHeading(heading(v), NO_CONTEXT);
+  const labels = (c: number) => {
+    const others = (candidates.get('partNumber') ?? []).map((k) => k.col).filter((k) => k !== c);
+    const vals = body.filter((row) => others.some((k) => { const t = cellText(row, k); return /\d/.test(t) && !isLabel(t); })).map((row) => cellText(row, c)).filter(Boolean);
+    const n = vals.filter(isLabel).length;
+    return n >= 2 && n * 2 > vals.length;
+  };
   const fields = new Map<Field, number>();
-  for (const [f, list] of candidates) {
-    const col = (list.find((c) => filled(c.col) > 0) ?? list[0])?.col;
+  for (const [f, all] of candidates) {
+    // A board's, harness's or cable's revision ("Board Rev", "Cable Rev") is the parent's, never the line's.
+    const list = f === 'revision' ? all.filter((c) => !/^(board|cca|pwb|pwa|harness|cable)\b/.test(texts[c.col] ?? '')) : all;
+    const col = (list.find((c) => filled(c.col) > 0 && !(f === 'revision' && labels(c.col))) ?? list[0])?.col;
     if (f !== 'partNumber' && col !== undefined) fields.set(f, col);
   }
-  const pn = partNumberColumn(candidates.get('partNumber') ?? [], {
+  // A board's or harness's own number ("CCA P/N", "Harness P/N") names the parent, never the line's part.
+  const pn = partNumberColumn((candidates.get('partNumber') ?? []).filter((c) => !/^(board|cca|pwb|pwa|harness)\b/.test(texts[c.col] ?? '')), {
     filled,
     // Mostly find numbers counting up from 100 or less (a section heading, note, REF or 2A among them
     // does not change that), unless the sheet has its own find or line column beside this one.
     findNumbers: (c) => {
       if (!FIND_HEADING.test(texts[c] ?? '') && texts.some((t, j) => j !== c && FIND_HEADING.test(t))) return false;
-      const finds = column(c).filter((v) => FIND_NUMBER.test(v));
-      return finds.length * 2 > filled(c) && Math.min(...finds.map((v) => parseInt(v, 10))) <= 100;
+      // Counted over the rows with another of the table's columns filled: a note, a section title or a sum
+      // label alone in the column, or merged across the table, is not one of its values.
+      const elsewhere = [...candidates.values()].flat().map((k) => k.col).filter((k) => k !== c);
+      const values = body.filter((row) => elsewhere.some((k) => cellText(row, k)) && new Set(row.map(norm).filter(Boolean)).size >= 2).map((row) => cellText(row, c)).filter(Boolean);
+      const finds = values.filter((v) => FIND_NUMBER.test(v));
+      return finds.length * 2 > values.length && Math.min(...finds.map((v) => parseInt(v, 10))) <= 100;
     },
     values: (c) => column(c).filter((v) => COMPONENT_VALUE.test(v)).length * 2 > filled(c),
+    labels,
     distinct: (c) => new Set(column(c).map((v) => v.toLowerCase())).size * 2 > filled(c),
+    numbers: (c, m) => {
+      const values = body.filter((row) => /\d/.test(cellText(row, m))).map((row) => cellText(row, c)).filter(Boolean);
+      return values.length > 0 && values.filter((v) => /\d/.test(v)).length * 2 >= values.length;
+    },
     covers: (c, m) => {
       const bought = body.filter((row) => cellText(row, m));
       return bought.filter((row) => cellText(row, c)).length * 2 > bought.length;
     },
-    described: fields.has('description') && filled(fields.get('description') as number) > 0,
+    described: (() => {
+      const d = fields.get('description');
+      if (d === undefined || filled(d) === 0) return false;
+      // Descriptions tell the rows apart unless one is blank, or two under the same parent (1.1 and 1.2, or
+      // 1 and 2) are the same: CAD lists each component once under its parent, so those are two parts (a cut
+      // list: one profile at several lengths). The find numbers stand in only when they are all different.
+      if (fields.has('level')) return true;
+      const items = (candidates.get('partNumber') ?? []).filter((c) => c.kind === 'item').map((c) => c.col);
+      const numbered = body.flatMap((row) => { const c = items.find((i) => FIND_NUMBER.test(cellText(row, i))); return c === undefined ? [] : [{ find: cellText(row, c), desc: norm(cellText(row, d)) }]; });
+      if (new Set(numbered.map((r) => r.find)).size < numbered.length) return true;
+      const siblings = new Set<string>();
+      for (const r of numbered) {
+        const key = `${r.find.replace(/\.?[^.]*$/, '')}|${r.desc}`;
+        if (!r.desc || siblings.has(key)) return false;
+        siblings.add(key);
+      }
+      return true;
+    })(),
   });
   if (pn !== undefined) fields.set('partNumber', pn);
+  // An electrical BOM's Part holding values (10K, 0.1uF), not taken as the part number, describes the line when nothing else does.
+  const valueCol = (candidates.get('partNumber') ?? []).find((c) => c.kind === 'value' && c.col !== pn && filled(c.col) > 0)?.col;
+  if (valueCol !== undefined && !(fields.has('description') && filled(fields.get('description') as number) > 0)) fields.set('description', valueCol);
   const revisionIsVersion = /^(version|ver\.?)$/.test(texts[fields.get('revision') ?? -1] ?? '');
   const labelCols = [fields.get('partNumber'), fields.get('description')].filter((c): c is number => c !== undefined);
   // A repeat of the header, as a BOM printed one table per subassembly repeats it.
@@ -383,16 +496,20 @@ function readTable(rows: Rows, headerRow: number, candidates: Map<Field, Candida
     ].filter(Boolean).join('. ');
     lines.push({ partNumber, revision, description, qtyPer: qty > 0 ? qty : 1, notes });
   });
-  return end < rows.length ? [...lines, ...readTable(rows, end, headerCandidates(rows[end] ?? []), (rows[end] ?? []).map(heading))] : lines;
+  return next ? [...lines, ...readTable(rows, next.headerRow, next.fields, next.texts)] : lines;
 }
 
 interface ColumnFacts {
+  /** Mostly headings or labels. */
+  labels: (c: number) => boolean;
   filled: (c: number) => number;
   findNumbers: (c: number) => boolean;
   /** Mostly component values (10K, 0.1uF). */
   values: (c: number) => boolean;
   /** Mostly different values, not a parent repeated down the rows. */
   distinct: (c: number) => boolean;
+  /** On the rows where column m holds a number, at least half of c's values have a digit, as part numbers do (labels such as "Email" or "Due Date" do not). */
+  numbers: (c: number, m: number) => boolean;
   /** Filled on most of the rows where column m is. */
   covers: (c: number, m: number) => boolean;
   described: boolean;
@@ -401,18 +518,25 @@ interface ColumnFacts {
 /** The part-number column: see the rules above the headings. */
 function partNumberColumn(list: readonly Candidate[], facts: ColumnFacts): number | undefined {
   const real = list
-    .filter((c) => !(c.kind === 'item' && facts.findNumbers(c.col)))
+    .filter((c) => !(c.kind === 'item' && facts.findNumbers(c.col)) && !facts.labels(c.col))
     // An electrical BOM's Part holding values (10K) ranks below the manufacturer's number.
     .map((c) => (c.kind === 'value' && facts.values(c.col) ? { ...c, strength: 1.25 } : c))
     .sort((a, b) => b.strength - a.strength || a.col - b.col);
   let chosen = real.find((c) => facts.filled(c.col) > 0);
+  if (chosen?.kind === 'dwg') {
+    // A drawing number covers several dash numbers and no bought part: the customer's own number, filled on
+    // as many rows with different values, is the part's.
+    const dwg = chosen;
+    chosen = real.find((c) => c.kind !== 'mfr' && c.kind !== 'dwg' && c.strength >= 1.75 && facts.filled(c.col) >= facts.filled(dwg.col) && facts.distinct(c.col) && facts.numbers(c.col, dwg.col) && facts.covers(c.col, dwg.col)) ?? dwg;
+  }
   if (chosen?.kind === 'mfr') {
-    // A customer's numbering covers the made parts and most of the bought ones; a parent repeated down
-    // the rows never does.
+    // A customer's numbering covers the made parts and most of the bought ones (all of them, where every
+    // row is bought); a parent repeated down the rows never does.
     const mfr = chosen;
-    chosen = real.find((c) => c.kind !== 'mfr' && c.strength >= 1.75 && facts.filled(c.col) > facts.filled(mfr.col) && facts.distinct(c.col) && facts.covers(c.col, mfr.col)) ?? mfr;
+    chosen = real.find((c) => c.kind !== 'mfr' && c.strength >= 1.75 && facts.filled(c.col) >= facts.filled(mfr.col) && facts.distinct(c.col) && facts.numbers(c.col, mfr.col) && facts.covers(c.col, mfr.col)) ?? mfr;
   }
   if (chosen) return chosen.col;
   // Only find numbers have values: they stand in for part numbers only when there is no description.
-  return facts.described ? undefined : (list.find((c) => facts.filled(c.col) > 0) ?? list[0])?.col;
+  // Never when the sheet has a part-number column of its own, empty or not.
+  return facts.described || list.some((c) => c.kind !== 'item') ? undefined : (list.find((c) => facts.filled(c.col) > 0) ?? list[0])?.col;
 }
