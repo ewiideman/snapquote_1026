@@ -493,3 +493,30 @@ test('a one-column tooling table under the form does not outrank the form', () =
     [], ['TOOLING'], ['Item', 'Tooling Description', 'Cavitation', 'Cost'], [1, 'Family mold', 4], [2, 'Bezel mold', 2]] }]);
   assert.deepEqual(r.lines.slice(0, 3).map((l) => l.description), ['COVER', 'GASKET, FOAM', 'MAGNET']);
 });
+
+test("repeated section headers with an empty MPN column keep the customer's numbers", () => {
+  const head = ['LINE #', 'WELCH ALLYN PART\nNO.', '100 PCS', 'MFR', 'MPN', 'COMMENTS'];
+  const r = proposeLines([{ name: 'S', rows: [['MOLDED PARTS'], head, ['001', 1187078], ['002', 1187076], ['MACHINED PARTS'], head, ['003', 1187123], ['SHEET METAL PARTS'], head, ['004', 1187126]] }]);
+  assert.deepEqual(r.lines.map((l) => l.partNumber), ['1187078', '1187076', '1187123', '1187126']);
+});
+
+test("one-row sections: the customer's column, not the manufacturer's; find numbers with a signature block below", () => {
+  const moog = ['Moog Part Number', 'Nomenclature', 'Mfr', 'Mfr P/N', 'Qty/Assy'];
+  const r = proposeLines([{ name: 'S', rows: [['MOLDED PARTS'], ['Moog Part Number', 'Nomenclature', 'Color', 'Qty/Assy'], ['78-8081-0084-9', 'SPACER', 'Natural', 1],
+    ['HARDWARE'], moog, ['78-8081-0085-3', 'NUT, HEX KEPS', 'Lee Spring', 'LC-022C-09-40', 'A/R'], ['PURCHASED PARTS'], moog, ['78-8081-0090-8', 'FAN', 'Brady', 'B-427-8', 6]] }]);
+  assert.deepEqual(r.lines.filter((l) => l.description).map((l) => l.partNumber), ['78-8081-0084-9', '78-8081-0085-3', '78-8081-0090-8']);
+  const dwg = ['Item No.', 'Drawing Number', 'Rev', 'Description:', 'Qty Per Assy'];
+  const z = proposeLines([{ name: 'S', rows: [['SHEET METAL PARTS'], dwg, ['001', '441-0347-11', 'D', 'COVER', 1], ['MACHINED PARTS'], dwg, ['003', '441-0344-07', 'B', 'ADAPTER', 2], [],
+    ['Quoted By:', '', 'Date:'], ['Signature:']] }]);
+  assert.deepEqual(z.lines.filter((l) => l.description).map((l) => l.partNumber), ['441-0347-11', '441-0344-07']);
+});
+
+test("a price-break heading under a second Part No. column does not hold the table open", () => {
+  const top = ['Customer', 'Customer', 'Customer', 'Customer', 'Unit Price', 'Unit Price', 'Supplier', 'Supplier'];
+  const r = proposeLines([{ name: 'S', rows: [['MACHINED PARTS'], top, ['Line No.', 'Part No.', 'Description', 'Qty/Assy', 'Price @ 100', 'Price @ 1,000', 'Part No.', 'Lead Time'],
+    [1, '8324-4328', 'MANIFOLD', 4], [2, '8324-4330', 'SHAFT', 1], [], ['HARDWARE'],
+    ['Customer', 'Customer', 'Customer', 'Supplier', 'Supplier', 'Customer', 'Unit Price', 'Unit Price', 'Supplier', 'Supplier'],
+    ['Line No.', 'Part No.', 'Description', 'Mfr', 'Mfr P/N', 'Qty/Assy', 'Price @ 100', 'Price @ 1,000', 'Part No.', 'Lead Time'],
+    [6, 'PUR-0319-07', 'SCREW, FLAT HD', 'Lee Spring', 'LC-022C-01-39', 4]] }]);
+  assert.deepEqual(r.lines.map((l) => [l.partNumber, l.qtyPer]), [['8324-4328', 4], ['8324-4330', 1], ['PUR-0319-07', 4]]);
+});

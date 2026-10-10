@@ -199,9 +199,16 @@ const cellText = (row: readonly unknown[] | undefined, i: number | undefined): s
 const nonBlank = (row: readonly unknown[] | undefined): boolean => (row ?? []).some((v) => norm(v));
 const isHeaderLike = (f: Map<Field, Candidate[]>): boolean => f.size >= 2 && (f.has('partNumber') || f.has('description'));
 
-/** A row with a part number (a value with a digit that is not a heading) under the table's part-number column is one of its rows, whatever else it holds. */
+/**
+ * A row with a part number (a value with a digit that is neither a heading nor a price or quantity
+ * heading such as "Price @ 1,000") under the table's part-number column is one of its rows, whatever else
+ * it holds.
+ */
 const holdsPart = (row: readonly unknown[] | undefined, table: Map<Field, Candidate[]>): boolean =>
-  (table.get('partNumber') ?? []).some((c) => { const t = cellText(row, c.col); return /\d/.test(t) && !classifyHeading(heading(t), NO_CONTEXT); });
+  (table.get('partNumber') ?? []).some((c) => {
+    const t = cellText(row, c.col);
+    return /\d/.test(t) && !/[@$]|\b(price|cost|qty|quantity|pcs|usd)\b/i.test(t) && !classifyHeading(heading(t), NO_CONTEXT);
+  });
 
 /** A header row whose known headings all lie right of the table's columns: a block beside it (revision history, tooling). */
 const beside = (h: Map<Field, Candidate[]>, table: Map<Field, Candidate[]>): boolean => {
@@ -379,7 +386,11 @@ function readTable(rows: Rows, headerRow: number, candidates: Map<Field, Candida
       // Read as one only when that keeps every column the lower row names, as strongly ("MOLDED PARTS" over
       // "Briggs & Stratton Part #" or over "P/N" does not).
       const keeps = [...h].every(([f, list]) => list.every((c) => stackedFields.get(f)?.some((k) => k.col === c.col && k.strength >= c.strength)));
-      end = stackedFields.size >= h.size ? j - 1 : j;
+      // Group headings merged over the next table's columns ("Customer | Customer | Supplier | Supplier"),
+      // every value repeated, belong to it too.
+      const values = (up ?? []).map(norm).filter(Boolean);
+      const grouped = j - 1 > headerRow && !holdsPart(up, candidates) && values.length >= 2 && values.every((v) => values.indexOf(v) !== values.lastIndexOf(v));
+      end = stackedFields.size >= h.size || grouped ? j - 1 : j;
       next = keeps && stackedFields.size >= h.size ? { headerRow: j, fields: stackedFields, texts: both.map(heading) } : { headerRow: j, fields: h, texts: (rows[j] ?? []).map(heading) };
       break;
     }
@@ -412,9 +423,10 @@ function readTable(rows: Rows, headerRow: number, candidates: Map<Field, Candida
     findNumbers: (c) => {
       if (!FIND_HEADING.test(texts[c] ?? '') && texts.some((t, j) => j !== c && FIND_HEADING.test(t))) return false;
       // Counted over the rows with another of the table's columns filled: a note, a section title or a sum
-      // label alone in the column, or merged across the table, is not one of its values.
+      // label alone in the column, or merged across the table, is not one of its values; nor is a label
+      // ("Quoted By:") under it.
       const elsewhere = [...candidates.values()].flat().map((k) => k.col).filter((k) => k !== c);
-      const values = body.filter((row) => elsewhere.some((k) => cellText(row, k)) && new Set(row.map(norm).filter(Boolean)).size >= 2).map((row) => cellText(row, c)).filter(Boolean);
+      const values = body.filter((row) => elsewhere.some((k) => cellText(row, k)) && new Set(row.map(norm).filter(Boolean)).size >= 2).map((row) => cellText(row, c)).filter((v) => v && !isLabel(v));
       const finds = values.filter((v) => FIND_NUMBER.test(v));
       return finds.length * 2 > values.length && Math.min(...finds.map((v) => parseInt(v, 10))) <= 100;
     },
@@ -423,7 +435,8 @@ function readTable(rows: Rows, headerRow: number, candidates: Map<Field, Candida
     distinct: (c) => new Set(column(c).map((v) => v.toLowerCase())).size * 2 > filled(c),
     numbers: (c, m) => {
       const values = body.filter((row) => /\d/.test(cellText(row, m))).map((row) => cellText(row, c)).filter(Boolean);
-      return values.length > 0 && values.filter((v) => /\d/.test(v)).length * 2 >= values.length;
+      // With no number in column m at all (only repeated headings), there is nothing to weigh against.
+      return values.filter((v) => /\d/.test(v)).length * 2 >= values.length;
     },
     covers: (c, m) => {
       const bought = body.filter((row) => cellText(row, m));

@@ -48,6 +48,19 @@ Read README.md first. This file is the rules and where things stand.
   (`nextOf` in `src/ui/pages/Board.tsx`; `sentAt` added to the board card). Blue is for action and
   selection only; status is words plus color. Other screens take the tokens and shell; their own
   redesign is still to come.
+- State (2026-10-10, parts lists): **a dropped spreadsheet's parts come from the customer's own
+  part-number column** (`src/quoting/bom.ts`: every rule in its header comment; every confirmed case in
+  `tests/unit/bom.test.ts`). Read: '<Company> P/N' and 'Item #' headings, PLM exports (Number /
+  Version / Name: "B.1" is revision B, the version kept in the notes), two-row headings, title blocks
+  (never the header), sections with their own headers, blocks beside the table, TOTAL/Subtotal/Excel
+  subtotal rows (skipped), find numbers (never a part number while anything else tells rows apart), a
+  manufacturer's or drawing number giving way to the customer's column. Six review rounds, the last by
+  generator sweeps (scratch only): against the reader before this change, parts dropped fell from 4,120
+  to 262 per 5,000 CAD/PLM/ERP files, 16,771 to 300 per 5,000 quote forms, 6,159 to 2,767 per 5,000
+  electrical BOMs; wrong revisions to 0. Known limits: one sheet is read (a BOM split across sheets);
+  a customer whose name holds a refused word ("Black Box", "Arrow", "Second Sight") loses its
+  '<Name> P/N' column; Digi-Key cart -ND numbers; a Dash No. column is not joined; the same part number
+  twice in one file is added once; charge rows (Tooling, NRE) are kept as lines.
 - **On-prem only. Period.** The app, PostgreSQL and attached files run on Mack's server. No cloud
   service, no outside API, no CDN at run time. Libraries are npm packages bundled at build.
 - **American English** everywhere: code, comments, screens, docs.
