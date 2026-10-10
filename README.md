@@ -59,12 +59,18 @@ Requirements: Node.js 22.18 or later, PostgreSQL 14 or later.
 
 ```bash
 npm ci --include=dev
+# A PostgreSQL role and an empty database; the name must start with snapquote_1026.
+psql postgres -c "CREATE ROLE snapquote LOGIN PASSWORD '<password>';"
+psql postgres -c "CREATE DATABASE snapquote_1026 OWNER snapquote;"
 cp .env.example .env          # then set DATABASE_URL, STORAGE_DIR, PORT
-npm run db:migrate            # creates the tables and loads the Metals rates
+npm run db:migrate            # creates the tables and loads the calculators' rates
 npm run user -- add eric "Eric Wiideman" administrator
 npm run build:ui
 npm start                     # http://<server>:3200
 ```
+
+On a laptop, `.env` needs only four lines: `DATABASE_URL=postgres://snapquote:<password>@127.0.0.1:5432/snapquote_1026`,
+`STORAGE_DIR=storage`, `HOST=127.0.0.1` and `PORT=3200`. `.env.example` is written for Mack's Windows server.
 
 The first administrator adds everyone else under Settings. Roles: **Business development** (quotes),
 **Estimator** (one department's prices), **Manager** (both, every department), **Administrator** (also
