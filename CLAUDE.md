@@ -9,6 +9,9 @@ Read README.md first. This file is the rules and where things stand.
   Metals calculator, Procurement vendor quotes, manual prices for every department, business
   development's own prices with a reason, review and send, the customer's PDF, won/lost/no bid,
   revisions, accounts and Metals rates under Settings.
+- **Linking SnapQuote to the Production Scheduler is set aside** (Eric Wiideman, Oct 10, 2026): do
+  not build on the exchange below, do not propose it as a next step, and leave `MACK_EXCHANGE_DIR`
+  unset on Mack's server. The code stays as it is.
 - State (2026-10-05, scheduler link): **SnapQuote's side of a file exchange with the Production
   Scheduler is built; the scheduler's side is not** (Eric Wiideman, Oct 5: file drop, quotes into the
   scheduler first, Chris Glaski ties work cells to XA facilities; then "keep the production scheduler
@@ -84,7 +87,7 @@ Read README.md first. This file is the rules and where things stand.
   (markup, terms, validity) — those are settings an administrator enters.
 - Ports: 3200 (3000/3003 are the old SnapQuote, 3100 the Production Scheduler, same server).
 - Open: ITAR quotes are flagged but visible to everyone signed in (who may see them is Mack's call);
-  no approval step before sending (add only if Mack asks); Molding, Machining and Assembly hours to the scheduler (the exchange carries Metals hours only); installing as a Windows
+  no approval step before sending (add only if Mack asks); installing as a Windows
   service with NSSM like the scheduler (`docs/16` there).
 - Libraries: Express 5, `pg`, exceljs, pdfkit, mailparser, @kenjiuno/msgreader; React + Vite in
   `src/ui`. Node ≥ 22.18 runs TypeScript directly: erasable syntax only, `.ts` import extensions.
