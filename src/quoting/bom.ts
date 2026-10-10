@@ -3,12 +3,14 @@
 // The header row is found by its words within the first 20 rows of each sheet; two rows are read as one
 // when the headings are stacked ("Part" over "No."). The header with parts under it that names the most
 // known columns is used, on whichever sheet it is; a title block ("Customer P/N | 4100-0001 | Rev | C")
-// is not a header. A later table on the same sheet with its own, different header is read through its own
-// columns. Only part number, revision, description and quantity per are taken as fields; material, notes
-// and level go into the line's notes, word for word. A row with neither part number nor description is
-// skipped, and so are a sum line (TOTAL, Subtotal, Excel's "<group> Total"), a repeat of the header and a
-// banner merged across the table. Charge rows (Tooling, NRE, Freight) are kept: they say what the
-// customer asked for. Nothing is guessed about who prices a part.
+// is not a header. Reading starts at the first table on that sheet with part numbers under it (purchased
+// parts above fabricated ones), and each later table with its own header is read through its own
+// columns; a block beside the table (revision history, tooling) does not interrupt it. Only part number,
+// revision, description and quantity per are taken as fields; material, notes and level go into the
+// line's notes, word for word. A row with neither part number nor description is skipped, and so are a
+// sum line (TOTAL, Subtotal, Excel's "<group> Total"), a repeat of the header and a banner merged across
+// the table. Charge rows (Tooling, NRE, Freight) are kept: they say what the customer asked for. Nothing
+// is guessed about who prices a part.
 
 export interface ProposedLine {
   partNumber: string;
@@ -116,7 +118,7 @@ function classify(text: string, ctx: Context): Hit | null {
   if (text === 'number' && ctx.plm) return pn(2.75);
   if ((m = MFR_PN.exec(text))) return pn(m[1] ? 1.5 : 2.5, 'mfr');
   if (ITEM_PN.test(text)) return pn(2.6, 'item');
-  if (/^no\.?$/.test(text)) return pn(1, 'item');
+  if (text === 'no.') return pn(1, 'item');
   if (text === 'material' && ctx.sap) return pn(2.9);
   if (BARE_REV.test(text)) return rev(3);
   if ((m = NAMED_REV.exec(text))) {
@@ -160,8 +162,8 @@ const heading = (v: unknown): string => norm(v)
 type Candidate = { col: number; strength: number; kind?: Hit['kind'] };
 const NO_FIELDS = new Map<Field, Candidate[]>();
 
-/** Every column a header row names, strongest first for each field (the earlier column on a tie). */
-function headerCandidates(cells: readonly unknown[]): Map<Field, Candidate[]> {
+/** Each column's heading as classified beside the row's other headings. */
+function headingHits(cells: readonly unknown[]): (Hit | null)[] {
   const texts = cells.map(heading);
   const ctx: Context = {
     // A PLM export: a "Number" column beside a "Version" or lifecycle "State" column.
@@ -169,9 +171,13 @@ function headerCandidates(cells: readonly unknown[]): Map<Field, Candidate[]> {
     electrical: texts.some((t) => /^(ref(erence)?s?|ref\.? ?des(ignators?)?|designators?|refdes|value)$/.test(t)),
     sap: texts.includes('short text'),
   };
+  return texts.map((text) => (text ? classifyHeading(text, ctx) : null));
+}
+
+/** Every column a header row names, strongest first for each field (the earlier column on a tie). */
+function headerCandidates(cells: readonly unknown[]): Map<Field, Candidate[]> {
   const found = new Map<Field, Candidate[]>();
-  texts.forEach((text, col) => {
-    const hit = text ? classifyHeading(text, ctx) : null;
+  headingHits(cells).forEach((hit, col) => {
     if (hit) found.set(hit.field, [...(found.get(hit.field) ?? []), { col, strength: hit.strength, ...(hit.kind ? { kind: hit.kind } : {}) }]);
   });
   return new Map([...found].map(([f, list]) => [f, list.sort((a, b) => b.strength - a.strength || a.col - b.col)]));
@@ -180,6 +186,10 @@ function headerCandidates(cells: readonly unknown[]): Map<Field, Candidate[]> {
 const cellText = (row: readonly unknown[] | undefined, i: number | undefined): string => (row === undefined || i === undefined ? '' : String(row[i] ?? '').trim());
 const nonBlank = (row: readonly unknown[] | undefined): boolean => (row ?? []).some((v) => norm(v));
 const isHeaderLike = (f: Map<Field, Candidate[]>): boolean => f.size >= 2 && (f.has('partNumber') || f.has('description'));
+
+/** A row with a part number (a value with a digit that is not a heading) under the table's part-number column is one of its rows, whatever else it holds. */
+const holdsPart = (row: readonly unknown[] | undefined, table: Map<Field, Candidate[]>): boolean =>
+  (table.get('partNumber') ?? []).some((c) => { const t = cellText(row, c.col); return /\d/.test(t) && !classifyHeading(heading(t), NO_CONTEXT); });
 
 /** Two heading rows read as one: "Part" over "No." is "Part No."; a merged cell repeated into both is read once. */
 const stacked = (top: readonly unknown[], bottom: readonly unknown[]): string[] =>
@@ -200,17 +210,20 @@ function titleBlockRow(rows: readonly (readonly unknown[])[], r: number): boolea
   if (!labels.some((c) => /\d/.test(texts[c + 1] ?? ''))) return false;
   let n = r + 1;
   while (n < rows.length && new Set((rows[n] ?? []).map(norm).filter(Boolean)).size <= 1) n++;
-  if (n >= rows.length) return true;
+  // With nothing but one-value lines under it, it is a title block, unless two or more of them are
+  // numbers down a label's column ("Part Number" over 4100-1010, 4100-1011): that is a table. A note has words.
+  if (n >= rows.length) return !labels.some((c) => /\s/.test(texts[c + 1] ?? '') && rows.slice(r + 1).filter((row) => /^\S*\d\S*$/.test(norm(row[c]))).length >= 2);
   const next = (rows[n] ?? []).map(norm);
   return labels.some((c) => !!next[c]) && labels.every((c) => !/\d/.test(next[c] ?? ''));
 }
 
-// A find number: 1, 10, 0010, 1.1, 1.2.3, 2A.
-const FIND_NUMBER = /^\d{1,4}(\.\d{1,4})*[A-Za-z]?$/;
+// A find number: 1, 10, 0010, 1.1, 1.2.3, 2A (never 10.1234: that is a part number).
+const FIND_NUMBER = /^\d{1,4}(\.\d{1,2})*[A-Za-z]?$/;
 // A column of the sheet's own find or line numbers.
-const FIND_HEADING = /^(find|line|balloon|pos(ition)?)\b|^item\s*#?$/;
-// A component's value in an electrical BOM: 10K, 0.1uF, 4.7nF, 4K7, 0R, DNP.
-const COMPONENT_VALUE = /^(\d+(\.\d+)?\s*(p|n|u|µ|m|k|meg|g)?\s*(f|h|ohms?|Ω|r|v|w|a|hz|%)?|\d+[rkmunp]\d+|dnp|nc)$/i;
+const FIND_HEADING = /^(find|line|balloon|pos(ition)?)[\s.-]*(item[\s.-]*)?((no|nr|nbr|num(ber)?|#|id|seq(uence)?)\.?)?$|^item\s*#?$/;
+// A component's value in an electrical BOM: 10K, 0.1uF, 4.7nF, 4K7, 0R, DNP, and bare numbers of three
+// significant digits (100, 4700, 49.9), never a part number such as 300042.
+const COMPONENT_VALUE = /^((0|[1-9]\d{0,2}0*)(\.\d+)?|\d+(\.\d+)?\s*((p|n|u|µ|m|k|meg|g)\s*(f|h|ohms?|Ω|r|v|w|a|hz|%)?|(f|h|ohms?|Ω|r|v|w|a|hz|%))|\d+[rkmunp]\d+|dnp|nc)$/i;
 // A sum line, as a quote form's part number or description: "TOTAL", "Totals:", "Subtotal", "Grand Total
 // (USD)", "Total tooling", "TOTAL OF ... PER ASSEMBLY", "Order total", "Sum".
 const SUM_LABEL = /^((sub|grand)[\s-]*)?totals?\s*((of|per|for)\b.*|(cost|costs|price|prices|amount|value|qty|quantity|tooling|nre|usd|each|ea|\$)\s*(\(.*\))?)?\s*:?$|^[a-z][a-z -]{0,30}\s+totals?\s*(\(.*\))?\s*:?$|^sum\s*:?$/i;
@@ -225,8 +238,9 @@ const QTY_WITH_UNIT = /^(\d+(\.\d+)?)\s*(ea|each|pcs?|pieces|x)\.?$/i;
 type Rows = readonly (readonly unknown[])[];
 
 export function proposeLines(sheets: readonly { name: string; rows: Rows }[]): BomResult {
-  type Header = { sheet: string; headerRow: number; fields: Map<Field, Candidate[]>; texts: string[]; rows: Rows; rank: number };
+  type Header = { sheet: string; top: number; headerRow: number; fields: Map<Field, Candidate[]>; texts: string[]; rows: Rows; rank: number; data: number };
   let best: Header | null = null;
+  const headers: Header[] = [];
   for (const s of sheets) {
     const single = s.rows.map((row, r) => (r < 50 ? headerCandidates(row) : NO_FIELDS));
     for (let r = 0; r < Math.min(20, s.rows.length); r++) {
@@ -238,9 +252,18 @@ export function proposeLines(sheets: readonly { name: string; rows: Rows }[]): B
         const both = stacked(row, below);
         const fields = headerCandidates(both);
         // Read as one only when that names more than the lower row alone, or the upper row heads two or
-        // more columns ("Part | Part | Quantity" over "Number | Rev | Per Assy"); a one-cell sheet title
-        // over the headings is not stacked onto them.
-        const heads = row.filter((v, c) => norm(v) && norm(below[c]) && !/\d/.test(norm(v))).length;
+        // more columns ("Part | Part | Quantity" over "Number | Rev | Per Assy"). An upper cell heads a
+        // column only when the stacked heading keeps the lower one's field at least as strong (or the lower
+        // alone is unknown), or it is one party word that refuses a part heading ("Supplier" over "Part
+        // No."). A sheet title or company name over "Part Number" does neither.
+        const lower = headingHits(below), stackedHits = headingHits(both);
+        const heads = row.filter((v, c) => {
+          const top = norm(v);
+          if (!top || !norm(below[c]) || /\d/.test(top)) return false;
+          const lo = lower[c], st = stackedHits[c];
+          if (!lo || (st && st.field === lo.field && st.strength >= lo.strength)) return true;
+          return !/\s/.test(heading(v)) && refused(heading(v));
+        }).length;
         if (fields.size >= 2 && fields.size >= (single[r]?.size ?? 0) && (fields.size > (single[r + 1]?.size ?? 0) || heads >= 2)) {
           options.push({ last: r + 1, fields, texts: both.map(heading) });
         }
@@ -252,18 +275,26 @@ export function proposeLines(sheets: readonly { name: string; rows: Rows }[]): B
         const cols = [...(o.fields.get('partNumber') ?? []), ...(o.fields.get('description') ?? [])].map((c) => c.col);
         let data = 0;
         for (let i = o.last + 1; i < Math.min(s.rows.length, o.last + 30); i++) {
-          if (isHeaderLike(single[i] ?? NO_FIELDS)) break;
+          if (isHeaderLike(single[i] ?? NO_FIELDS) && !holdsPart(s.rows[i], o.fields)) break;
           if (cols.some((c) => cellText(s.rows[i], c))) data++;
         }
         // Rows under it first, then more known columns, then one naming a part number, then a description;
         // the earlier row on a tie.
         const rank = (data > 0 ? 1000 : 0) + o.fields.size * 4 + (o.fields.has('partNumber') ? 2 : 0) + (o.fields.has('description') ? 1 : 0);
-        if (!best || rank > best.rank) best = { sheet: s.name, headerRow: o.last, fields: o.fields, texts: o.texts, rows: s.rows, rank };
+        const h: Header = { sheet: s.name, top: r, headerRow: o.last, fields: o.fields, texts: o.texts, rows: s.rows, rank, data };
+        headers.push(h);
+        if (!best || rank > best.rank) best = h;
       }
     }
   }
   if (!best) return { sheet: null, headerRow: null, lines: [], problem: 'No column headed part number or description was found in the first 20 rows.' };
-  const { sheet, headerRow, fields, texts, rows } = best as Header;
+  // The parts start at the first table on that sheet with a part-number column and parts under it above
+  // the best header (purchased parts above fabricated ones); later tables are read in turn.
+  const chosen = best as Header;
+  const start = headers.find((h) => h.rows === chosen.rows && h.headerRow < chosen.top && isHeaderLike(h.fields) && h.fields.has('partNumber')
+    && h.rows.slice(h.headerRow + 1, chosen.top).some((row) => holdsPart(row, h.fields))
+    && !headers.some((o) => o.rows === h.rows && o.headerRow === h.headerRow && o.rank > h.rank)) ?? chosen;
+  const { sheet, headerRow, fields, texts, rows } = start;
   const lines = readTable(rows, headerRow, fields, texts);
   return { sheet, headerRow, lines, problem: lines.length ? null : 'The header was found but no rows below it name a part.' };
 }
@@ -272,14 +303,15 @@ const sameColumns = (a: Map<Field, Candidate[]>, b: Map<Field, Candidate[]>): bo
   a.size === b.size && [...b].every(([f, list]) => a.get(f)?.[0]?.col === list[0]?.col);
 
 /**
- * The parts under a header, down to a later table with its own, different header (a one-row table for
- * the assembly above the BOM, or purchased parts below fabricated ones), which is then read the same way.
+ * The parts under a header, down to a later table with its own, different header naming a part number or
+ * as many columns (a one-row table for the assembly above the BOM, or purchased parts below fabricated
+ * ones), which is then read the same way.
  */
 function readTable(rows: Rows, headerRow: number, candidates: Map<Field, Candidate[]>, texts: string[]): ProposedLine[] {
   let end = rows.length;
   for (let j = headerRow + 1; j < rows.length; j++) {
     const h = headerCandidates(rows[j] ?? []);
-    if (isHeaderLike(h) && h.size >= candidates.size && !sameColumns(h, candidates) && !titleBlockRow(rows, j)) { end = j; break; }
+    if (isHeaderLike(h) && (h.size >= candidates.size || h.has('partNumber')) && !sameColumns(h, candidates) && !holdsPart(rows[j], candidates) && !titleBlockRow(rows, j)) { end = j; break; }
   }
   const body = rows.slice(headerRow + 1, end);
   const column = (c: number) => body.map((row) => cellText(row, c)).filter(Boolean);

@@ -398,3 +398,52 @@ test('a charge row merged over part number to quantity is kept', () => {
   const r = proposeLines([{ name: 'S', rows: [['Line', 'Part Number', 'Description', 'Qty', 'Unit Price'], ['1', '4100-1010', 'CHASSIS', '1', ''], ['2', 'Tooling', 'Tooling', 'Tooling', '']] }]);
   assert.deepEqual(r.lines.map((l) => l.partNumber), ['4100-1010', 'Tooling']);
 });
+
+// Fifth review (Oct 10).
+
+test('a block beside the table (revision history, tooling) does not take over the header', () => {
+  const pns = (rows: unknown[][]) => proposeLines([{ name: 'S', rows }]).lines.map((l) => l.partNumber);
+  assert.deepEqual(pns([['Line', 'Part Number', 'Rev', 'Description', 'Qty', '', 'REVISION HISTORY'], ['1', '4100-1010', 'B', 'BEZEL', '1', '', 'Rev', 'Description', 'Date'],
+    ['2', '4100-1011', 'C', 'BASE', '1', '', 'A', 'Initial release', '2025-03-01'], ['3', '4100-1012', 'A', 'DOOR', '1']]), ['4100-1010', '4100-1011', '4100-1012']);
+  assert.deepEqual(pns([['Line', 'Part Number', 'Description', 'EAU', '', 'TOOLING'], ['1', '4100-1010', 'BEZEL', '5000'], ['2', '4100-1011', 'HOUSING', '5000', '', 'Description', 'Qty', 'Cost'],
+    ['3', '4100-1012', 'DOOR', '5000', '', 'Family mold', '1', ''], ['4', '4100-1013', 'LENS', '5000']]), ['4100-1010', '4100-1011', '4100-1012', '4100-1013']);
+});
+
+test('a Yes/No column or a commodity word in the first row does not make it a header', () => {
+  const r = proposeLines([{ name: 'S', rows: [['Part Number', 'Description', 'Commodity', 'Qty', 'Customer Supplied'], ['PC-2405', 'LEXAN 940 PC', 'Resin', '0.12', 'No'],
+    ['CLR-9001', 'COLORANT', 'Colorant', '0.002', 'No'], ['INS-0440', 'INSERT, 4-40', 'Hardware', '4', 'Yes']] }]);
+  assert.deepEqual(r.lines.map((l) => [l.partNumber, l.qtyPer]), [['PC-2405', 0.12], ['CLR-9001', 0.002], ['INS-0440', 4]]);
+});
+
+test("find numbers: a customer's all-digit numbers in Part, dotted part numbers, a Line Total column", () => {
+  const pns = (rows: unknown[][]) => proposeLines([{ name: 'S', rows }]).lines.map((l) => l.partNumber);
+  assert.deepEqual(pns([['Item', 'Quantity', 'Reference', 'Part', 'Description', 'Manufacturer', 'Mfr Part Number'], ['1', '2', 'R1,R2', '300042', 'RES 10K', 'Yageo', 'RC0603'],
+    ['2', '1', '', '410020', 'BRACKET', '', ''], ['3', '1', '', '410021', 'BRACKET', '', '']]), ['300042', '410020', '410021']);
+  assert.deepEqual(pns([['Item Number', 'Description', 'Qty'], ['10.1234.01', 'HOUSING', '1'], ['42.0016', 'GASKET', '1'], ['42.0017', 'GASKET', '1']]), ['10.1234.01', '42.0016', '42.0017']);
+  assert.deepEqual(pns([['Item No.', 'Description', 'Manufacturer', 'Manufacturer Part Number', 'Qty', 'Unit Price', 'Line Total'], ['1', 'FAN', 'EBM', 'EE80251', '2', '', ''], ['2', 'OP AMP', 'TI', 'LM358DR', '1', '', '']]),
+    ['EE80251', 'LM358DR']);
+});
+
+test('a title row of two cells over the headings is not stacked onto them', () => {
+  const pns = (rows: unknown[][]) => proposeLines([{ name: 'S', rows }]).lines.map((l) => l.partNumber);
+  assert.deepEqual(pns([['BILL OF MATERIAL', '', '', '', '', 'PROPRIETARY'], ['Part Number', 'Rev', 'Description', 'Qty', 'Dwg No.'], ['4100-1010-01', 'B', 'BRACKET, LH', '1', '4100-1010'],
+    ['4100-1010-02', 'B', 'BRACKET, RH', '1', '4100-1010']]), ['4100-1010-01', '4100-1010-02']);
+  assert.deepEqual(pns([['BILL OF MATERIAL', 'BILL OF MATERIAL'], ['Item', 'Part Number', 'Rev', 'Description', 'Qty', 'Manufacturer', 'Mfr P/N'], ['1', '4100-1010', 'B', 'CHASSIS', '1', '', ''],
+    ['2', '600-0012', 'A', 'FUSE HOLDER', '1', 'Littelfuse', '01550900M']]), ['4100-1010', '600-0012']);
+});
+
+test('a price form with only part numbers filled in is a table, not a title block', () => {
+  const r = proposeLines([
+    { name: 'Instructions', rows: [['ACME MEDICAL - RFQ'], [], ['Column', 'Description'], ['Part Number', 'ACME part number. Do not change.'], ['Unit Price', 'Price per piece in USD.']] },
+    { name: 'Quote', rows: [['Part Number', 'Unit Price @ 100', 'Unit Price @ 500', 'Notes'], ['4100-1010'], ['4100-1011']] },
+  ]);
+  assert.equal(r.sheet, 'Quote');
+  assert.deepEqual(r.lines.map((l) => l.partNumber), ['4100-1010', '4100-1011']);
+});
+
+test('sections on one sheet with their own headers are all read', () => {
+  const r = proposeLines([{ name: 'BOM', rows: [['PURCHASED PARTS'], ['Item', 'Part Number', 'Description', 'Qty Per', 'Mfr', 'Mfr P/N'], ['1', 'HW-0632-0375', 'Screw, pan hd', '22', 'McMaster', '91772A146'],
+    ['2', 'EL-FAN-80', 'Fan, 80 mm', '2', 'Sunon', 'EE80251S1'], [], ['FABRICATED PARTS'], ['Item', 'Part Number', 'Rev', 'Description', 'Qty Per', 'Material'],
+    ['3', '4100-1010', 'B', 'Chassis, base', '1', 'CRS 16 ga'], ['4', '4100-2010', 'C', 'Bracket', '2', '5052 .080']] }]);
+  assert.deepEqual(r.lines.map((l) => [l.partNumber, l.revision, l.qtyPer]), [['HW-0632-0375', '', 22], ['EL-FAN-80', '', 2], ['4100-1010', 'B', 1], ['4100-2010', 'C', 2]]);
+});
