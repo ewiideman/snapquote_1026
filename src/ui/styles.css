@@ -115,8 +115,8 @@ svg { flex: none; }
 .brand-link { color: inherit; border-radius: var(--r); }
 .brand-link:hover { text-decoration: none; }
 .brand { display: flex; align-items: center; gap: 9px; font-weight: 650; font-size: 15px; color: var(--ink); letter-spacing: -0.015em; }
-.brand-mark { flex: none; width: 26px; height: 26px; border-radius: 7px; background: var(--accent); display: grid; place-items: center; }
-.brand-mark svg { width: 15px; height: 15px; }
+/* The SnapQuote "SQ" mark, carried over from the old SnapQuote (its logo.png), with the name beside it. */
+.brand-logo { flex: none; display: block; height: 20px; width: auto; }
 .side-menu { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: var(--space-4); }
 .sidenav { display: flex; flex-direction: column; gap: 2px; }
 .sidenav a { position: relative; display: flex; align-items: center; gap: 10px; height: 36px; padding: 0 10px; border-radius: var(--r); color: var(--ink-2); font-weight: 500; }
@@ -429,6 +429,7 @@ table.grid .sub { font-size: 12px; color: var(--muted); }
 .signin { min-height: 100vh; display: grid; place-items: center; padding: 24px; background: var(--bg); }
 .signin form { width: min(380px, 100%); background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-xl); padding: 28px; display: flex; flex-direction: column; gap: 14px; box-shadow: var(--shadow-sm); }
 .signin .brand { color: var(--ink); font-size: 18px; }
+.signin .brand-logo { height: 24px; }
 
 /* ---------------------------------------------------------------- narrower windows */
 @media (max-width: 1199px) {

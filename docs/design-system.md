@@ -38,6 +38,9 @@ Text is 14px; 12–13px only for secondary metadata. Numbers are tabular.
 
 ## Components
 
+- **Brand**: the old SnapQuote's "SQ" mark (`src/ui/assets/snapquote-logo.png`, cropped from its
+  `logo.png`) beside the name "SnapQuote"; the browser icon is its boxed app icon
+  (`snapquote-icon.png`). The mark keeps its own light blue: it is the brand, not an action color.
 - **Shell** (`main.tsx`): left sidebar with the brand, the destinations each role has (unchanged), the
   "needs you" count, and the account and sign-out at the foot. 1200px and wider: full sidebar.
   721–1199px: an icon rail whose names show on hover and keyboard focus. 720px and under: a top bar with

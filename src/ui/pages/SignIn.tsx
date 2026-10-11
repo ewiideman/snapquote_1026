@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { patch, post, message } from '../lib/api.ts';
 import type { Account, Department } from '../lib/types.ts';
+import logoUrl from '../assets/snapquote-logo.png';
 
 export function SignIn({ onSignedIn }: { onSignedIn: (a: Account, d: Department[]) => void }) {
   const [id, setId] = useState('');
@@ -23,7 +24,7 @@ export function SignIn({ onSignedIn }: { onSignedIn: (a: Account, d: Department[
         }
       }}>
         <span className="brand">
-          <span className="brand-mark"><svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" /></svg></span>
+          <img className="brand-logo" src={logoUrl} alt="" />
           SnapQuote
         </span>
         <p className="muted">Quotes for Mack Molding, from RFQ to order.</p>

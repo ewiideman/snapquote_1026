@@ -2,6 +2,7 @@ import { StrictMode, useCallback, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import '@fontsource-variable/inter/wght.css';
 import './styles.css';
+import logoUrl from './assets/snapquote-logo.png';
 import { get, post, SIGNED_OUT_EVENT } from './lib/api.ts';
 import { useRoute } from './lib/router.ts';
 import type { Account, BoardCard, Department, QueueItem } from './lib/types.ts';
@@ -17,7 +18,7 @@ import { WorkCells } from './pages/WorkCells.tsx';
 function Brand() {
   return (
     <span className="brand">
-      <span className="brand-mark"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" /></svg></span>
+      <img className="brand-logo" src={logoUrl} alt="" />
       <span className="brand-name">SnapQuote</span>
     </span>
   );
