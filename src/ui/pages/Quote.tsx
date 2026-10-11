@@ -432,7 +432,8 @@ function Files({ d, onChange }: { d: QuoteDetail; onChange: (n?: QuoteDetail) =>
       try {
         const r = await upload<DropResult>(`/quotes/${d.quote.id}/files`, f);
         const n = r.linesAdded.reduce((s, l) => s + l.lineIds.length, 0);
-        if (n) said.push(`${n} part${n === 1 ? '' : 's'} from ${f.name}`);
+        const sheets = [...new Set(r.linesAdded.flatMap((l) => l.sheets))];
+        if (n) said.push(`${n} part${n === 1 ? '' : 's'} from ${f.name}${sheets.length > 1 ? ` (sheets ${sheets.join(', ')})` : ''}`);
         const dup = r.linesAdded.reduce((s, l) => s + l.alreadyOnQuote, 0);
         if (dup) repeats.push(`${dup} part${dup === 1 ? '' : 's'} in ${f.name} ${dup === 1 ? 'was' : 'were'} already on the quote and not added again.`);
         if (r.fromEmail) said.push(`the email from ${r.fromEmail.from}`);

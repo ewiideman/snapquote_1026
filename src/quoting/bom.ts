@@ -21,12 +21,18 @@ export interface ProposedLine {
 }
 
 export interface BomResult {
-  sheet: string | null;
-  headerRow: number | null;
+  /** The sheets parts came from, in the order read, each with the row its header ends on. */
+  sheets: { name: string; headerRow: number }[];
   lines: ProposedLine[];
   /** Why nothing was taken, when nothing was. */
   problem: string | null;
 }
+
+/** A sheet as the spreadsheet reader gives it; a hidden sheet (a lookup list, an old copy) is not a parts list. */
+export interface SheetIn { name: string; rows: readonly (readonly unknown[])[]; hidden?: boolean }
+
+/** A line as a table gives it, before the sheets are put together. */
+type ReadLine = ProposedLine & { qtyGiven: boolean };
 
 type Field = 'partNumber' | 'revision' | 'description' | 'qtyPer' | 'material' | 'notes' | 'level';
 
@@ -267,11 +273,10 @@ const QTY_WITH_UNIT = /^(\d+(\.\d+)?)\s*(ea|each|pcs?|pieces|x)\.?$/i;
 
 type Rows = readonly (readonly unknown[])[];
 
-export function proposeLines(sheets: readonly { name: string; rows: Rows }[]): BomResult {
-  type Header = { sheet: string; top: number; headerRow: number; fields: Map<Field, Candidate[]>; texts: string[]; rows: Rows; rank: number; data: number };
-  let best: Header | null = null;
+export function proposeLines(sheets: readonly SheetIn[]): BomResult {
+  type Header = { sheet: number; top: number; headerRow: number; fields: Map<Field, Candidate[]>; texts: string[]; rows: Rows; rank: number; data: number; tableRows: number };
   const headers: Header[] = [];
-  for (const s of sheets) {
+  sheets.forEach((s, si) => {
     const single = s.rows.map((row, r) => (r < 50 ? headerCandidates(row) : NO_FIELDS));
     for (let r = 0; r < Math.min(20, s.rows.length); r++) {
       if (titleBlockRow(s.rows, r)) continue;
@@ -335,22 +340,75 @@ export function proposeLines(sheets: readonly { name: string; rows: Rows }[]): B
         // title block has one row of values, a column guide prose), then more known columns, then one naming a part number, then a description;
         // the earlier row on a tie.
         const rank = (data > 0 ? 1000 : 0) + (tableRows >= 2 && isHeaderLike(o.fields) ? 500 : 0) + o.fields.size * 4 + (o.fields.has('partNumber') ? 2 : 0) + (o.fields.has('description') ? 1 : 0);
-        const h: Header = { sheet: s.name, top: r, headerRow: o.last, fields: o.fields, texts: o.texts, rows: s.rows, rank, data };
-        headers.push(h);
-        if (!best || rank > best.rank) best = h;
+        headers.push({ sheet: si, top: r, headerRow: o.last, fields: o.fields, texts: o.texts, rows: s.rows, rank, data, tableRows });
       }
     }
-  }
-  if (!best) return { sheet: null, headerRow: null, lines: [], problem: 'No column headed part number or description was found in the first 20 rows.' };
-  // The parts start at the first table on that sheet with a part-number column and parts under it above
-  // the best header (purchased parts above fabricated ones); later tables are read in turn.
-  const chosen = best as Header;
-  const start = headers.find((h) => h.rows === chosen.rows && h.headerRow < chosen.top && h.data > 0 && isHeaderLike(h.fields) && h.fields.has('partNumber')
-    && h.rows.slice(h.headerRow + 1, chosen.top).some((row) => holdsPart(row, h.fields))
-    && !headers.some((o) => o.rows === h.rows && o.headerRow === h.headerRow && o.rank > h.rank)) ?? chosen;
-  const { sheet, headerRow, fields, texts, rows } = start;
-  const lines = readTable(rows, headerRow, fields, texts);
-  return { sheet, headerRow, lines, problem: lines.length ? null : 'The header was found but no rows below it name a part.' };
+  });
+  // Each sheet's best header: the highest rank, the earlier row on a tie.
+  const bestOf = (si: number): Header | null => headers.reduce<Header | null>((b, h) => (h.sheet === si && (!b || h.rank > b.rank) ? h : b), null);
+  const best = sheets.map((_, si) => bestOf(si));
+  // The main sheet: the best header of all, on a visible sheet if any has one; the earlier sheet on a tie.
+  const visible = sheets.map((s, si) => si).filter((si) => !sheets[si]?.hidden && best[si]);
+  const main = (visible.length ? visible : sheets.map((_, si) => si)).reduce<number | null>((m, si) => {
+    const h = best[si];
+    return h && (m === null || h.rank > (best[m] as Header).rank) ? si : m;
+  }, null);
+  if (main === null) return { sheets: [], lines: [], problem: 'No column headed part number or description was found in the first 20 rows.' };
+  // Every other visible sheet holding a parts table is read too, after the main one, in workbook order: a
+  // header naming a part number (or a description and a quantity) with parts under it, two or more rows of
+  // them or one on an otherwise empty sheet. A revision history, a cover sheet, instructions or a title
+  // block is not one.
+  const isPartsTable = (h: Header | null): h is Header => !!h && h.data > 0 && isHeaderLike(h.fields)
+    && (h.fields.has('partNumber') || (h.fields.has('description') && h.fields.has('qtyPer')))
+    && (h.tableRows >= 2 || (h.tableRows === 1 && h.rows.slice(h.headerRow + 1).filter((row) => new Set(row.map(norm).filter(Boolean)).size >= 2).length === 1));
+  const order = [main, ...sheets.map((_, si) => si).filter((si) => si !== main && !sheets[si]?.hidden && isPartsTable(best[si] ?? null))];
+  const read = order.map((si) => {
+    // The parts start at the first table on the sheet with a part-number column and parts under it above
+    // its best header (purchased parts above fabricated ones); later tables are read in turn.
+    const chosen = best[si] as Header;
+    const start = headers.find((h) => h.sheet === si && h.headerRow < chosen.top && h.data > 0 && isHeaderLike(h.fields) && h.fields.has('partNumber')
+      && h.rows.slice(h.headerRow + 1, chosen.top).some((row) => holdsPart(row, h.fields))
+      && !headers.some((o) => o.sheet === si && o.headerRow === h.headerRow && o.rank > h.rank)) ?? chosen;
+    return { si, headerRow: start.headerRow, lines: readTable(start.rows, start.headerRow, start.fields, start.texts) };
+  });
+  const lines = mergeSheets(read.map((r) => ({ name: sheets[r.si]?.name ?? '', lines: r.lines })));
+  const used = read.filter((_, i) => lines.some((l) => l.sheet === i));
+  const many = used.length > 1;
+  return {
+    sheets: (used.length ? used : read.slice(0, 1)).map((r) => ({ name: sheets[r.si]?.name ?? '', headerRow: r.headerRow })),
+    lines: lines.map(({ sheet, line }) => ({ ...line, notes: [many ? `Sheet "${sheets[read[sheet]?.si ?? 0]?.name ?? ''}"` : '', line.notes].filter(Boolean).join('. ') })),
+    problem: lines.length ? null : 'The header was found but no rows below it name a part.',
+  };
+}
+
+/**
+ * The sheets' lines as one list. A part number met again (on a later sheet, or on the same sheet at the
+ * same revision) is the same part: it is kept once, where it was first met, and a different revision or
+ * quantity given the second time goes into its notes rather than becoming a second line (an approved
+ * vendor list, a pricing tab, a flattened copy or an old revision's tab repeats the parts).
+ */
+function mergeSheets(sheets: { name: string; lines: ReadLine[] }[]): { sheet: number; line: ProposedLine }[] {
+  const out: { sheet: number; line: ProposedLine; extra: string[] }[] = [];
+  const byPn = new Map<string, (typeof out)[number][]>();
+  sheets.forEach(({ name, lines }, sheet) => {
+    for (const { qtyGiven, ...line } of lines) {
+      const pn = norm(line.partNumber);
+      const met = pn ? byPn.get(pn) ?? [] : [];
+      const same = met.find((m) => m.sheet !== sheet || norm(m.line.revision) === norm(line.revision));
+      if (same) {
+        const differs = [
+          line.revision && norm(line.revision) !== norm(same.line.revision) ? `revision ${line.revision}` : '',
+          qtyGiven && line.qtyPer !== same.line.qtyPer ? `quantity ${line.qtyPer}` : '',
+        ].filter(Boolean).join(' and ');
+        if (differs) same.extra.push(same.sheet === sheet ? `Listed again with ${differs}` : `Sheet "${name}" lists it with ${differs}`);
+        continue;
+      }
+      const entry = { sheet, line, extra: [] as string[] };
+      out.push(entry);
+      if (pn) byPn.set(pn, [...met, entry]);
+    }
+  });
+  return out.map(({ sheet, line, extra }) => ({ sheet, line: extra.length ? { ...line, notes: [line.notes, ...extra].filter(Boolean).join('. ') } : line }));
 }
 
 const sameColumns = (a: Map<Field, Candidate[]>, b: Map<Field, Candidate[]>): boolean =>
@@ -361,7 +419,7 @@ const sameColumns = (a: Map<Field, Candidate[]>, b: Map<Field, Candidate[]>): bo
  * as many columns (a one-row table for the assembly above the BOM, or purchased parts below fabricated
  * ones), which is then read the same way.
  */
-function readTable(rows: Rows, headerRow: number, candidates: Map<Field, Candidate[]>, texts: string[]): ProposedLine[] {
+function readTable(rows: Rows, headerRow: number, candidates: Map<Field, Candidate[]>, texts: string[]): ReadLine[] {
   let end = rows.length;
   let next: { headerRow: number; fields: Map<Field, Candidate[]>; texts: string[] } | null = null;
   const words = (t: readonly string[]) => { const w = [...t]; while (w.length && !w[w.length - 1]) w.pop(); return w.join('|'); };
@@ -481,7 +539,7 @@ function readTable(rows: Rows, headerRow: number, candidates: Map<Field, Candida
     while (n < body.length && !nonBlank(body[n])) n++;
     return n < body.length && repeatsHeader(body[n] ?? []);
   };
-  const lines: ProposedLine[] = [];
+  const lines: ReadLine[] = [];
   body.forEach((row, i) => {
     const partNumber = cellText(row, fields.get('partNumber'));
     const description = cellText(row, fields.get('description'));
@@ -507,7 +565,7 @@ function readTable(rows: Rows, headerRow: number, candidates: Map<Field, Candida
       revisionIsVersion && revRaw && revRaw !== revision ? `Version in the file: "${revRaw}"` : '',
       cellText(row, fields.get('notes')),
     ].filter(Boolean).join('. ');
-    lines.push({ partNumber, revision, description, qtyPer: qty > 0 ? qty : 1, notes });
+    lines.push({ partNumber, revision, description, qtyPer: qty > 0 ? qty : 1, notes, qtyGiven: qty > 0 });
   });
   return next ? [...lines, ...readTable(rows, next.headerRow, next.fields, next.texts)] : lines;
 }

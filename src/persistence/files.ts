@@ -18,9 +18,9 @@ export const MAX_FILE_BYTES = 100 * 1024 * 1024;
 
 export interface DropResult {
   attachments: { id: number; fileName: string }[];
-  /** Parts added from spreadsheets, by file. */
+  /** Parts added from spreadsheets, by file, with the sheets they came from. */
   /** `alreadyOnQuote`: parts in the file that the quote already had, not added again. */
-  linesAdded: { fileName: string; sheet: string | null; lineIds: number[]; alreadyOnQuote: number }[];
+  linesAdded: { fileName: string; sheets: string[]; lineIds: number[]; alreadyOnQuote: number }[];
   /** Spreadsheets that looked like a parts list but gave nothing, and why. */
   notRead: { fileName: string; problem: string }[];
   /** What the RFQ email filled in on the quote. */
@@ -104,7 +104,7 @@ export async function dropFile(db: Database, actor: Account, quoteId: number, fi
     try {
       return { fileName: s.fileName, ...proposeLines(await readSpreadsheet(s.fileName, s.bytes)) };
     } catch {
-      return { fileName: s.fileName, sheet: null, headerRow: null, lines: [], problem: 'The spreadsheet could not be read.' };
+      return { fileName: s.fileName, sheets: [], lines: [], problem: 'The spreadsheet could not be read.' };
     }
   }));
   await db.transaction(async (tx) => {
@@ -140,7 +140,7 @@ export async function dropFile(db: Database, actor: Account, quoteId: number, fi
         continue;
       }
       const added = await addLines(tx, quoteId, p.lines);
-      result.linesAdded.push({ fileName: p.fileName, sheet: p.sheet, lineIds: added.ids, alreadyOnQuote: added.skipped });
+      result.linesAdded.push({ fileName: p.fileName, sheets: p.sheets.map((s) => s.name), lineIds: added.ids, alreadyOnQuote: added.skipped });
     }
     if (result.linesAdded.length && q.status === 'estimating') {
       await tx.query("INSERT INTO quote.message (quote_id, author_id, kind, body) VALUES ($1, $2, 'event', $3)", [quoteId, actor.id, 'Parts were added from a file. Choose who prices them.']);

@@ -3,7 +3,8 @@
 import ExcelJS from 'exceljs';
 import { decodeText, parseCsv } from './csv.ts';
 
-export interface TextSheet { name: string; rows: string[][] }
+/** `hidden`: hidden in the workbook (a lookup list, an old copy), so not a parts list. */
+export interface TextSheet { name: string; rows: string[][]; hidden?: boolean }
 
 function cellText(v: ExcelJS.CellValue): string {
   if (v === null || v === undefined) return '';
@@ -30,6 +31,6 @@ export async function readSpreadsheet(fileName: string, bytes: Buffer): Promise<
       rows[n - 1] = values.slice(1).map(cellText);
     });
     for (let i = 0; i < rows.length; i++) rows[i] ??= [];
-    return { name: ws.name, rows };
+    return ws.state === 'visible' ? { name: ws.name, rows } : { name: ws.name, rows, hidden: true };
   });
 }

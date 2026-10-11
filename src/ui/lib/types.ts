@@ -56,7 +56,7 @@ export interface QuoteDetail {
 
 export interface DropResult {
   attachments: { id: number; fileName: string }[];
-  linesAdded: { fileName: string; sheet: string | null; lineIds: number[]; alreadyOnQuote: number }[];
+  linesAdded: { fileName: string; sheets: string[]; lineIds: number[]; alreadyOnQuote: number }[];
   notRead: { fileName: string; problem: string }[];
   fromEmail: { subject: string; from: string; date: string | null; customerName: string | null } | null;
 }
