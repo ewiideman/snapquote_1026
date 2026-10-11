@@ -202,7 +202,8 @@ export async function createAccount(db: Database, actor: string | null, input: {
   });
 }
 
-export async function updateAccount(db: Database, actor: string, id: string, input: { displayName?: unknown; role?: unknown; department?: unknown; email?: unknown; disabled?: unknown; password?: unknown }): Promise<void> {
+/** A password set here is temporary (chosen again at the next sign-in) unless `temporary` is false. */
+export async function updateAccount(db: Database, actor: string, id: string, input: { displayName?: unknown; role?: unknown; department?: unknown; email?: unknown; disabled?: unknown; password?: unknown; temporary?: boolean }): Promise<void> {
   const row = await accountRow(db, id);
   if (!row) throw new HttpError(404, 'No such account.');
   const role = input.role === undefined ? row.role : requireRole(input.role);
@@ -213,12 +214,12 @@ export async function updateAccount(db: Database, actor: string, id: string, inp
     await tx.query(
       `UPDATE app.user_account SET display_name = coalesce($2, display_name), role = $3, department = $4, email = CASE WHEN $5::boolean THEN $6 ELSE email END,
               disabled_at = CASE WHEN $7::boolean IS NULL THEN disabled_at WHEN $7 THEN coalesce(disabled_at, now()) ELSE NULL END,
-              password_hash = coalesce($8, password_hash), must_change_password = CASE WHEN $8 IS NULL THEN must_change_password ELSE true END,
+              password_hash = coalesce($8, password_hash), must_change_password = CASE WHEN $8 IS NULL THEN must_change_password ELSE $9 END,
               password_changed_at = CASE WHEN $8 IS NULL THEN password_changed_at ELSE now() END
         WHERE id = $1`,
       [id, typeof input.displayName === 'string' && input.displayName.trim() ? input.displayName.trim() : null, role, department,
         input.email !== undefined, typeof input.email === 'string' && input.email.trim() ? input.email.trim() : null,
-        typeof input.disabled === 'boolean' ? input.disabled : null, hash]);
+        typeof input.disabled === 'boolean' ? input.disabled : null, hash, input.temporary ?? true]);
     if (input.disabled === true || hash) await tx.query("UPDATE app.session SET ended_at = now(), ended_reason = 'changed by administrator' WHERE user_id = $1 AND ended_at IS NULL", [id]);
     await audit(tx, actor, 'user_account.updated', 'user_account', id, { role, department, disabled: input.disabled, passwordSet: !!hash });
   });

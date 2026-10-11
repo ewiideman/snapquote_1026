@@ -76,6 +76,14 @@ The first administrator adds everyone else under Settings. Roles: **Business dev
 **Estimator** (one department's prices), **Manager** (both, every department), **Administrator** (also
 people, rates and the terms printed on quotes).
 
+To see SnapQuote as each department sees it, `npm run user -- demo` adds one account each for
+business development, Metals, Procurement, Molding (ADC), Machining and Assembly (`bd.demo`,
+`metals.demo`, ...) and prints their passwords once; running it again gives new ones. Each estimator
+signs in to their department's queue and prices with its calculator (Metals, Molding (ADC), Machining,
+Assembly) or vendor quotes (Procurement). The queues fill once a quote is sent to the departments (the
+RFQ test package's step 6). `npm run user -- demo off` switches the demo accounts off; never leave them
+on at Mack.
+
 Customers and suppliers from the old SnapQuote: `docs/import-from-old-snapquote.md`.
 
 ## Check it
