@@ -183,3 +183,28 @@ test("August 2026 fix: Mack's worked example, $46.60 sheet and a 3.7 x 1.9 in pa
   assert.equal(mtl07.partsPerSheet, 528);
   close(mtl07.materialCostPerPart, 0.11, 2);
 });
+
+// Oct 22, 2026 (Eric Wiideman for Metals): a blank that fits only turned is nested turned, and a blank
+// that does not nest is costed by weight at the purchased sheet's own $/kg rather than $0.
+
+test('a blank that fits only turned 90 degrees is nested turned; one that fits as entered is not turned', () => {
+  // 30 x 60 in: 60 in across a 47 in usable width does not fit; turned, 60 along 95.5 and 30 across 47 does.
+  const turned = computeSheetUsage(SHEET, { lengthMm: 30 * IN, widthMm: 60 * IN }, 10, NEST);
+  assert.ok(turned);
+  assert.deepEqual([turned.rotated, turned.partsAcross, turned.partsDown, turned.partsPerSheet], [true, 1, 1, 1]);
+  const asEntered = computeSheetUsage(SHEET, { lengthMm: 60 * IN, widthMm: 30 * IN }, 10, NEST);
+  assert.deepEqual([asEntered?.rotated, asEntered?.partsPerSheet], [false, 1]);
+  const r = priceMetalsLine(lineFromItem({ blank: { lengthMm: 30 * IN, widthMm: 60 * IN, thicknessMm: 1.27 } }), null, CATALOG);
+  assert.equal(r.sheetCosted, true);
+  assert.equal(r.breaks[0]?.nesting?.rotated, true);
+  assert.ok(r.warnings.some((w) => /only turned 90 degrees/.test(w)));
+});
+
+test("a blank that does not nest is costed at the sheet's own $/kg, and the warning gives the sizes", () => {
+  const tooBig = lineFromItem({ blank: { lengthMm: 3000, widthMm: 2000, thicknessMm: 1.27 }, material: { itemNumber: ITEM } });
+  const r = priceMetalsLine(tooBig, null, CATALOG);
+  assert.equal(r.sheetCosted, false);
+  assert.ok((r.breaks[0]?.perPart.material ?? 0) > 0, 'material is not $0');
+  assert.ok(!r.warnings.some((w) => /priced at \$0/.test(w)));
+  assert.ok(r.warnings.some((w) => w.startsWith('A 118.11 x 78.74 in blank (3000 x 2000 mm) does not fit the 96 x 48 in sheet (95.5 x 47 in usable) either way round.')), r.warnings.join(' | '));
+});

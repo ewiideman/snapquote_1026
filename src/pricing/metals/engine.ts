@@ -180,15 +180,28 @@ export function computeSheetUsage(
   const usableLIn = sheetLmm / MM_PER_IN - params.lengthMarginIn;
   const usableWIn = sheetWmm / MM_PER_IN - params.widthMarginIn;
 
-  const partsAcross = Math.floor(usableLIn / (partLIn + params.webIn) + 1e-9);
-  const partsDown = Math.floor(usableWIn / (partWIn + params.webIn) + 1e-9);
-  const partsPerSheet = partsAcross * partsDown;
+  const grid = (l: number, w: number) => {
+    const across = Math.floor(usableLIn / (l + params.webIn) + 1e-9);
+    const down = Math.floor(usableWIn / (w + params.webIn) + 1e-9);
+    return { across, down, perSheet: across * down };
+  };
+  // As entered: blank length along the sheet's length. A blank that fits only turned 90 degrees is nested
+  // turned (Eric Wiideman for Metals, Oct 22, 2026); one that fits as entered is never turned, so prices
+  // checked against Mack's workbook do not move.
+  let g = grid(partLIn, partWIn);
+  let rotated = false;
+  if (!(g.perSheet >= 1)) {
+    g = grid(partWIn, partLIn);
+    rotated = true;
+  }
+  const { across: partsAcross, down: partsDown, perSheet: partsPerSheet } = g;
   if (!(partsPerSheet >= 1)) return undefined;
 
   return {
     partsAcross,
     partsDown,
     partsPerSheet,
+    rotated,
     sheetsUsed: parts > 0 ? Math.ceil(parts / partsPerSheet) : 0,
     materialCostPerPart: (sheetPrice / partsPerSheet) * params.materialMarkup,
   };
@@ -246,7 +259,9 @@ function resolveMaterial(input: MetalsLineInput, catalog: MetalsCatalog, warning
     thicknessMm: input.blank?.thicknessMm ?? attrs?.thicknessMm,
     densityKgPerM3: density.densityKgPerM3,
     densityKnown: density.known,
-    pricePerKg: finiteOr0(m.pricePerKg),
+    // With no $/kg entered, the purchased sheet's own (its price over its weight): used when the blank does
+    // not nest on the sheet (Eric Wiideman for Metals, Oct 22, 2026; the old engine priced material at $0).
+    pricePerKg: finiteOr0(m.pricePerKg ?? spec?.pricePerKg),
   };
 }
 
@@ -419,10 +434,19 @@ export function priceMetalsLine(
   const sheetCosted =
     !laborOnly && computeSheetUsage(mat.sheet, blank, 1, nestingParams) !== undefined;
 
+  const turned = sheetCosted ? computeSheetUsage(mat.sheet, blank, 1, nestingParams) : undefined;
+  if (turned?.rotated) warnings.push(`The blank fits the sheet only turned 90 degrees, so it is nested that way (${turned.partsPerSheet} a sheet).`);
   if (!laborOnly && !sheetCosted) {
     const hasSheet = (mat.sheet.priceUsd ?? 0) > 0 && (mat.sheet.widthMm ?? 0) > 0 && (mat.sheet.lengthMm ?? 0) > 0;
     if (hasSheet && (blank.lengthMm ?? 0) > 0 && (blank.widthMm ?? 0) > 0) {
-      warnings.push('The part does not fit on the sheet; material falls back to mass x $/kg.');
+      const inch = (mm: number) => Math.round((mm / MM_PER_IN) * 100) / 100;
+      const usableL = inch(mat.sheet.lengthMm ?? 0) - nestingParams.lengthMarginIn;
+      const usableW = inch(mat.sheet.widthMm ?? 0) - nestingParams.widthMarginIn;
+      warnings.push(
+        `A ${inch(blank.lengthMm ?? 0)} x ${inch(blank.widthMm ?? 0)} in blank (${Math.round(blank.lengthMm ?? 0)} x ${Math.round(blank.widthMm ?? 0)} mm) ` +
+          `does not fit the ${inch(mat.sheet.lengthMm ?? 0)} x ${inch(mat.sheet.widthMm ?? 0)} in sheet (${usableL} x ${usableW} in usable) either way round. ` +
+          `Is the unit right? Material is costed by weight at $/kg.`,
+      );
     } else if (hasSheet) {
       warnings.push('Sheet nesting needs the part length and width; material falls back to mass x $/kg.');
     }
@@ -567,6 +591,7 @@ export function priceMetalsLine(
             partsDown: usage.partsDown,
             partsPerSheet: usage.partsPerSheet,
             sheetsUsed: usage.sheetsUsed,
+            ...(usage.rotated ? { rotated: true } : {}),
           }
         : null,
       materialKgPerPart: massKg,

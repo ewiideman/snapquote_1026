@@ -296,6 +296,8 @@ function Parts({ d, editable, onSaved, onDirty, onSaveState, openPrice }: { d: Q
   const [rows, setRows] = useState<Draft[]>(() => d.lines.map(toDraft));
   const [dirty, setDirty] = useState(false);
   const [error, setError] = useState<unknown>(null);
+  // Rows with their own-quantities editor open (one with quantities always shows it).
+  const [ownOpen, setOwnOpen] = useState<Set<string>>(() => new Set());
   // One save at a time. An edit made while a save is in flight is saved right after it, from the
   // latest rows, so a quick second change is never lost.
   const saving = useRef(false);
@@ -380,9 +382,17 @@ function Parts({ d, editable, onSaved, onDirty, onSaveState, openPrice }: { d: Q
                   <td className="tight">{editable ? <input className="bare" style={{ width: 52 }} value={r.revision} onChange={(e) => edit(r.key, { revision: e.target.value })} onBlur={() => dirty && save()} /> : r.revision}</td>
                   <td>{editable ? <input className="bare" value={r.description} placeholder="Description" onChange={(e) => edit(r.key, { description: e.target.value })} onBlur={() => dirty && save()} /> : r.description}
                     {r.notes && <div className="sub" style={{ paddingLeft: editable ? 7 : 0 }}>{r.notes}</div>}
-                    {r.quantities.length > 0 && <div className="sub" style={{ paddingLeft: editable ? 7 : 0 }}>Own quantities: {r.quantities.map(qty).join(', ')}</div>}
+                    {editable && (r.quantities.length > 0 || ownOpen.has(r.key)) ? (
+                      <div className="sub own-qty" style={{ paddingLeft: 7 }}>
+                        <span>Own quantities, in pieces, instead of the quote's</span>
+                        <Quantities value={r.quantities} disabled={false} onChange={(q) => edit(r.key, { quantities: q }, true)} />
+                        <button className="link" onClick={() => { setOwnOpen((o) => { const n = new Set(o); n.delete(r.key); return n; }); if (r.quantities.length) edit(r.key, { quantities: [] }, true); }}>Use the quote's quantities</button>
+                      </div>
+                    ) : editable ? (
+                      <div className="sub row-more" style={{ paddingLeft: 7 }}><button className="link" onClick={() => setOwnOpen((o) => new Set(o).add(r.key))}>Own quantities…</button></div>
+                    ) : r.quantities.length > 0 && <div className="sub">Own quantities: {r.quantities.map(qty).join(', ')} pieces</div>}
                   </td>
-                  <td className="tight">{editable ? <input className="bare num" style={{ width: 64 }} value={String(r.qtyPer)} onChange={(e) => { const n = Number(e.target.value); if (n > 0) edit(r.key, { qtyPer: n }); }} onBlur={() => dirty && save()} /> : <span className="right">{qty(r.qtyPer)}</span>}</td>
+                  <td className="tight">{r.quantities.length > 0 ? <span className="muted small" title="This part is priced at its own quantities, so quantity per assembly is not used.">own</span> : editable ? <input className="bare num" style={{ width: 64 }} value={String(r.qtyPer)} onChange={(e) => { const n = Number(e.target.value); if (n > 0) edit(r.key, { qtyPer: n }); }} onBlur={() => dirty && save()} /> : <span className="right">{qty(r.qtyPer)}</span>}</td>
                   <td>{editable ? (
                     <select className="bare" value={r.department ?? ''} onChange={(e) => edit(r.key, { department: (e.target.value || null) as DepartmentKey | null }, true)} style={!r.department ? { color: 'var(--late)' } : undefined}>
                       <option value="">Choose…</option>

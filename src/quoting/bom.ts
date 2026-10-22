@@ -11,6 +11,15 @@
 // sum line (TOTAL, Subtotal, Excel's "<group> Total"), a repeat of the header and a banner merged across
 // the table. Charge rows (Tooling, NRE, Freight) are kept: they say what the customer asked for. Nothing
 // is guessed about who prices a part.
+//
+// Quantity per is per assembly. In an indented BOM a row's quantity is per its parent, so it is multiplied
+// by the parent's own quantity per assembly, all the way up. The parent is told by a Level column (1, 2;
+// .1, ..2; the nearest row above at a lower level), or, with no Level column, by dotted find numbers (1.2
+// is under 1, met above it). A row at level 0 is the top assembly: its quantity multiplies nothing. A part
+// listed more than once in one table (the same screw under two subassemblies) is one line with the uses
+// added up; a repeat with no quantity (REF) adds nothing unless no listing has one, when each listing
+// counts one. The notes say how a quantity was reached. A part met again in another table or on another
+// sheet is not added up (see mergeSheets).
 
 export interface ProposedLine {
   partNumber: string;
@@ -32,7 +41,10 @@ export interface BomResult {
 export interface SheetIn { name: string; rows: readonly (readonly unknown[])[]; hidden?: boolean }
 
 /** A line as a table gives it, before the sheets are put together. */
-type ReadLine = ProposedLine & { qtyGiven: boolean };
+/** `table`: which table on its sheet; `level` and `find` place the row under its parent. */
+type ReadLine = ProposedLine & { qtyGiven: boolean; table: number; level: number | null; find: string };
+/** A line with its parent's quantity per assembly (`factor`) and the parent's name (`under`). */
+type PlacedLine = ReadLine & { factor: number; under: string };
 
 type Field = 'partNumber' | 'revision' | 'description' | 'qtyPer' | 'material' | 'notes' | 'level';
 
@@ -252,6 +264,8 @@ function titleBlockRow(rows: readonly (readonly unknown[])[], r: number): boolea
 
 // A find number: 1, 10, 0010, 1.1, 1.2.3, 2A (never 10.1234: that is a part number).
 const FIND_NUMBER = /^\d{1,4}(\.\d{1,2})*[A-Za-z]?$/;
+// A find number under another: 1.2 is under 1, 1.2.3 under 1.2.
+const DOTTED_FIND = /^\d{1,4}(\.\d{1,3})+$/;
 // A column of the sheet's own find or line numbers.
 const FIND_HEADING = /^(find|line|balloon|pos(ition)?)[\s.-]*(item[\s.-]*)?((no|nr|nbr|num(ber)?|#|id|seq(uence)?)\.?)?$|^item\s*#?$/;
 // A component's value in an electrical BOM: 10K, 0.1uF, 4.7nF, 4K7, 0R, DNP, and bare numbers of three
@@ -369,7 +383,7 @@ export function proposeLines(sheets: readonly SheetIn[]): BomResult {
     const start = headers.find((h) => h.sheet === si && h.headerRow < chosen.top && h.data > 0 && isHeaderLike(h.fields) && h.fields.has('partNumber')
       && h.rows.slice(h.headerRow + 1, chosen.top).some((row) => holdsPart(row, h.fields))
       && !headers.some((o) => o.sheet === si && o.headerRow === h.headerRow && o.rank > h.rank)) ?? chosen;
-    return { si, headerRow: start.headerRow, lines: readTable(start.rows, start.headerRow, start.fields, start.texts) };
+    return { si, headerRow: start.headerRow, lines: place(readTable(start.rows, start.headerRow, start.fields, start.texts)) };
   });
   const lines = mergeSheets(read.map((r) => ({ name: sheets[r.si]?.name ?? '', lines: r.lines })));
   const used = read.filter((_, i) => lines.some((l) => l.sheet === i));
@@ -381,34 +395,102 @@ export function proposeLines(sheets: readonly SheetIn[]): BomResult {
   };
 }
 
+/** A Level column's value: 0, 1, 2; ".1", "..2" (the digit is the level); "..." (the dots are); "Level 2". */
+function levelOf(text: string): number | null {
+  const t = text.trim().replace(/^(level|lvl\.?)\s*/i, '');
+  if (/^\d{1,2}$/.test(t)) return Number(t);
+  const m = /^(\.+)(\d{1,2})?$/.exec(t);
+  return m ? (m[2] !== undefined ? Number(m[2]) : (m[1] ?? '').length) : null;
+}
+
+const round4 = (n: number): number => Math.round(n * 10000) / 10000;
+const nameOf = (l: ProposedLine): string => l.partNumber || l.description;
+
 /**
- * The sheets' lines as one list. A part number met again (on a later sheet, or on the same sheet at the
- * same revision) is the same part: it is kept once, where it was first met, and a different revision or
- * quantity given the second time goes into its notes rather than becoming a second line (an approved
- * vendor list, a pricing tab, a flattened copy or an old revision's tab repeats the parts).
+ * Each line's parent's quantity per assembly, table by table: by the Level column when it holds two or
+ * more levels, else by dotted find numbers when one names a row above it. A line with no parent has 1.
  */
-function mergeSheets(sheets: { name: string; lines: ReadLine[] }[]): { sheet: number; line: ProposedLine }[] {
-  const out: { sheet: number; line: ProposedLine; extra: string[] }[] = [];
+function place(lines: ReadLine[]): PlacedLine[] {
+  const out: PlacedLine[] = [];
+  for (const table of [...new Set(lines.map((l) => l.table))]) {
+    const rows = lines.filter((l) => l.table === table);
+    const levels = new Set(rows.flatMap((l) => (l.level === null ? [] : [l.level])));
+    const byLevel = levels.size >= 2;
+    const parentFind = (f: string) => (DOTTED_FIND.test(f) ? f.replace(/\.\d+$/, '') : null);
+    const byFind = !byLevel && rows.some((l, i) => { const p = parentFind(l.find); return p !== null && rows.slice(0, i).some((r) => r.find === p); });
+    const stack: { level: number; total: number; name: string }[] = [];
+    const seen = new Map<string, number>();
+    const placed: PlacedLine[] = [];
+    rows.forEach((l) => {
+      let factor = 1, under = '';
+      if (byLevel && l.level !== null) {
+        while (stack.length && (stack[stack.length - 1]?.level ?? 0) >= l.level) stack.pop();
+        const p = stack[stack.length - 1];
+        if (p) { factor = p.total; under = p.name; }
+        // The top assembly (level 0) is what is quoted: its own quantity multiplies nothing.
+        stack.push({ level: l.level, total: l.level === 0 ? 1 : round4(factor * l.qtyPer), name: nameOf(l) });
+      } else if (byFind) {
+        const pf = parentFind(l.find);
+        const j = pf === null ? undefined : seen.get(pf);
+        const p = j === undefined ? undefined : placed[j];
+        if (p) { factor = round4(p.factor * p.qtyPer); under = nameOf(p); }
+      }
+      if (byFind && l.find) seen.set(l.find, placed.length);
+      placed.push({ ...l, factor, under });
+    });
+    out.push(...placed);
+  }
+  return out;
+}
+
+/**
+ * The sheets' lines as one list. A part number met again in the same table at the same revision is the
+ * same part used again: one line, its uses added up. Met again in another table, on a later sheet, or on
+ * the same sheet at the same revision, it is the same part listed again: kept once, where it was first
+ * met, and a different revision or quantity given the second time goes into its notes rather than becoming
+ * a second line (an approved vendor list, a pricing tab, a flattened copy or an old revision's tab repeats
+ * the parts).
+ */
+function mergeSheets(sheets: { name: string; lines: PlacedLine[] }[]): { sheet: number; line: ProposedLine }[] {
+  type Use = { qty: number; given: boolean; factor: number; under: string };
+  const out: { sheet: number; table: number; line: ProposedLine; extra: string[]; uses: Use[] }[] = [];
   const byPn = new Map<string, (typeof out)[number][]>();
   sheets.forEach(({ name, lines }, sheet) => {
-    for (const { qtyGiven, ...line } of lines) {
+    for (const { qtyGiven, table, level: _level, find: _find, factor, under, ...line } of lines) {
+      const use: Use = { qty: line.qtyPer, given: qtyGiven, factor, under };
       const pn = norm(line.partNumber);
       const met = pn ? byPn.get(pn) ?? [] : [];
+      const again = met.find((m) => m.sheet === sheet && m.table === table && norm(m.line.revision) === norm(line.revision));
+      if (again) {
+        again.uses.push(use);
+        continue;
+      }
       const same = met.find((m) => m.sheet !== sheet || norm(m.line.revision) === norm(line.revision));
       if (same) {
+        const first = same.uses[0];
         const differs = [
           line.revision && norm(line.revision) !== norm(same.line.revision) ? `revision ${line.revision}` : '',
-          qtyGiven && line.qtyPer !== same.line.qtyPer ? `quantity ${line.qtyPer}` : '',
+          qtyGiven && first && round4(line.qtyPer * factor) !== round4(first.qty * first.factor) ? `quantity ${round4(line.qtyPer * factor)}` : '',
         ].filter(Boolean).join(' and ');
         if (differs) same.extra.push(same.sheet === sheet ? `Listed again with ${differs}` : `Sheet "${name}" lists it with ${differs}`);
         continue;
       }
-      const entry = { sheet, line, extra: [] as string[] };
+      const entry = { sheet, table, line, extra: [] as string[], uses: [use] };
       out.push(entry);
       if (pn) byPn.set(pn, [...met, entry]);
     }
   });
-  return out.map(({ sheet, line, extra }) => ({ sheet, line: extra.length ? { ...line, notes: [line.notes, ...extra].filter(Boolean).join('. ') } : line }));
+  return out.map(({ sheet, line, extra, uses }) => {
+    // Uses with a quantity are added up; with none given anywhere, each listing counts one.
+    const counted = uses.some((u) => u.given) ? uses.filter((u) => u.given) : uses;
+    const total = round4(counted.reduce((s, u) => s + u.qty * u.factor, 0));
+    const one = (u: Use) => (u.factor !== 1 ? `${round4(u.qty)} in each of ${round4(u.factor)} ${u.under}` : u.under ? `${round4(u.qty)} in ${u.under}` : `${round4(u.qty)}`);
+    const how = uses.length > 1
+      ? `Quantity per assembly ${total}, listed ${uses.length} times: ${uses.map((u) => (counted.includes(u) ? one(u) : `${one(u)} (no quantity, not added)`)).join(' + ')}`
+      : (uses[0]?.factor ?? 1) !== 1 ? `Quantity per assembly ${total}: ${one(uses[0] as Use)}` : '';
+    const notes = [line.notes, how, ...extra].filter(Boolean).join('. ');
+    return { sheet, line: { ...line, qtyPer: total > 0 ? total : 1, notes } };
+  });
 }
 
 const sameColumns = (a: Map<Field, Candidate[]>, b: Map<Field, Candidate[]>): boolean =>
@@ -419,7 +501,7 @@ const sameColumns = (a: Map<Field, Candidate[]>, b: Map<Field, Candidate[]>): bo
  * as many columns (a one-row table for the assembly above the BOM, or purchased parts below fabricated
  * ones), which is then read the same way.
  */
-function readTable(rows: Rows, headerRow: number, candidates: Map<Field, Candidate[]>, texts: string[]): ReadLine[] {
+function readTable(rows: Rows, headerRow: number, candidates: Map<Field, Candidate[]>, texts: string[], table = 0): ReadLine[] {
   let end = rows.length;
   let next: { headerRow: number; fields: Map<Field, Candidate[]>; texts: string[] } | null = null;
   const words = (t: readonly string[]) => { const w = [...t]; while (w.length && !w[w.length - 1]) w.pop(); return w.join('|'); };
@@ -539,6 +621,10 @@ function readTable(rows: Rows, headerRow: number, candidates: Map<Field, Candida
     while (n < body.length && !nonBlank(body[n])) n++;
     return n < body.length && repeatsHeader(body[n] ?? []);
   };
+  // Columns that may hold dotted find numbers (1, 1.1, 1.2): an item or find column, or the part-number column standing in for one.
+  const findCols = [...new Set([...(candidates.get('partNumber') ?? []).filter((c) => c.kind === 'item').map((c) => c.col), ...texts.flatMap((t, c) => (FIND_HEADING.test(t) ? [c] : []))])]
+    .filter((c) => column(c).some((v) => DOTTED_FIND.test(v)));
+  const findCol = findCols[0];
   const lines: ReadLine[] = [];
   body.forEach((row, i) => {
     const partNumber = cellText(row, fields.get('partNumber'));
@@ -565,9 +651,10 @@ function readTable(rows: Rows, headerRow: number, candidates: Map<Field, Candida
       revisionIsVersion && revRaw && revRaw !== revision ? `Version in the file: "${revRaw}"` : '',
       cellText(row, fields.get('notes')),
     ].filter(Boolean).join('. ');
-    lines.push({ partNumber, revision, description, qtyPer: qty > 0 ? qty : 1, notes, qtyGiven: qty > 0 });
+    const levelText = cellText(row, fields.get('level'));
+    lines.push({ partNumber, revision, description, qtyPer: qty > 0 ? qty : 1, notes, qtyGiven: qty > 0, table, level: levelText ? levelOf(levelText) : null, find: cellText(row, findCol) });
   });
-  return next ? [...lines, ...readTable(rows, next.headerRow, next.fields, next.texts)] : lines;
+  return next ? [...lines, ...readTable(rows, next.headerRow, next.fields, next.texts, table + 1)] : lines;
 }
 
 interface ColumnFacts {

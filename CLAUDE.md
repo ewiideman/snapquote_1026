@@ -59,8 +59,15 @@ Read README.md first. This file is the rules and where things stand.
   to 262 per 5,000 CAD/PLM/ERP files, 16,771 to 300 per 5,000 quote forms, 6,159 to 2,767 per 5,000
   electrical BOMs; wrong revisions to 0. Known limits: one sheet is read (a BOM split across sheets);
   a customer whose name holds a refused word ("Black Box", "Arrow", "Second Sight") loses its
-  '<Name> P/N' column; Digi-Key cart -ND numbers; a Dash No. column is not joined; the same part number
-  twice in one file is added once; charge rows (Tooling, NRE) are kept as lines.
+  '<Name> P/N' column; Digi-Key cart -ND numbers; a Dash No. column is not joined; charge rows
+  (Tooling, NRE) are kept as lines; a sheet named for a subassembly is not multiplied by its use above.
+- State (2026-10-22, quantity per): **quantity per is per assembly, all the way up** (Eric Wiideman, Oct 22).
+  An indented BOM's quantities are multiplied by their parents' (a Level column: 0/1/2 or SAP dots, level 0
+  being the top assembly and multiplying nothing; else dotted find numbers, 1.2 under 1), and a part
+  listed more than once in one table is one line with its uses added (a REF repeat adds nothing); the
+  line's notes say how. Repeats in another table or sheet are still kept once (an AVL, a flattened copy).
+  `place` and `mergeSheets` in `src/quoting/bom.ts`. A part's own quantities (pieces, instead of the
+  quote's breaks) are set on its row: "Own quantities…".
 - **On-prem only. Period.** The app, PostgreSQL and attached files run on Mack's server. No cloud
   service, no outside API, no CDN at run time. Libraries are npm packages bundled at build.
 - **American English** everywhere: code, comments, screens, docs.
@@ -86,6 +93,10 @@ Read README.md first. This file is the rules and where things stand.
   setup divided by parts per assembly then by parts; freight mixes a yearly figure with a per-break
   one (defaults to $0); mass-costed material gets no 1.2 markup. Do not "fix" these without Metals.
   The calculator's tooling is spread over the parts, so a calculator estimate has no one-time charge.
+  Changed by decision (Eric Wiideman for Metals, Oct 22, 2026): a blank that fits the sheet only turned
+  90 degrees is nested turned (one that fits as entered is never turned); a blank that does not nest is
+  costed by weight at the purchased sheet's own $/kg, not $0; and a Metals price with $0 material (not
+  labor only) cannot be saved. 24 of the 71 sheet items have no price until an administrator enters one.
 - Quantities: a quote's quantities are assembly breaks; a part's pieces are break × quantity per
   assembly, unless the part has its own quantities (separate parts on one RFQ). Prices are per piece at
   the part's quantities. A missing price stays missing, never zero, and blocks sending.

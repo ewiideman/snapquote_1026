@@ -59,6 +59,10 @@ export function metalsRoutes(api: Router, db: Database, me: (res: Response) => A
     } catch (err) {
       throw new HttpError(400, `The calculator could not price this: ${(err as Error).message}`);
     }
+    // A missing price stays missing, never zero: a part that is not labor only cannot be priced with $0 material.
+    if (!problems.length && !input.laborOnly && result.breaks.some((x) => !(x.perPart.material > 0))) {
+      problems.push('Material comes out at $0, so this price cannot be used. Choose a material with a sheet price, enter the blank size or part weight, or mark the part labor only.');
+    }
     if (b.save) {
       if (problems.length) throw new HttpError(400, problems.join(' '));
       const bad = result.breaks.filter((x) => !Number.isFinite(x.unitPrice));

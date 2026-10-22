@@ -251,6 +251,8 @@ export type MetalsNesting = {
   partsPerSheet: number;
   /** Whole sheets the break would consume. Informational; not charged. */
   sheetsUsed: number;
+  /** Nested turned 90 degrees: the blank fits the sheet only that way. */
+  rotated?: boolean;
 };
 
 export type MetalsBreakResult = {

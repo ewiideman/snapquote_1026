@@ -564,13 +564,82 @@ test('sheets that are not parts lists add nothing: cover, instructions, revision
   assert.deepEqual(r.lines.map((l) => [l.partNumber, l.notes]), [['4100-1010', ''], ['300-0042', '']]);
 });
 
-test('a subassembly sheet holding one part is read; a part listed twice on one sheet is one line', () => {
+test('a subassembly sheet holding one part is read; a part listed twice in one table is one line, its uses added up', () => {
   const head = ['Part Number', 'Description', 'Qty'];
   const r = proposeLines([
     { name: 'TOP', rows: [head, ['4100-0100', 'Frame', '1'], ['HW-0632', 'SCREW', '4'], ['HW-0632', 'SCREW', '2']] },
     { name: 'FRAME', rows: [head, ['4100-0110', 'Rail', '2']] },
   ]);
   assert.deepEqual(r.lines.map((l) => [l.partNumber, l.qtyPer, l.notes]), [
-    ['4100-0100', 1, 'Sheet "TOP"'], ['HW-0632', 4, 'Sheet "TOP". Listed again with quantity 2'], ['4100-0110', 2, 'Sheet "FRAME"'],
+    ['4100-0100', 1, 'Sheet "TOP"'], ['HW-0632', 6, 'Sheet "TOP". Quantity per assembly 6, listed 2 times: 4 + 2'], ['4100-0110', 2, 'Sheet "FRAME"'],
   ]);
+});
+
+// Quantity per assembly (Oct 22): an indented BOM multiplied through its parents; a part used twice added up.
+
+test('a Level column: each quantity is multiplied by its parents, all the way up', () => {
+  const r = proposeLines([{ name: 'BOM', rows: [
+    ['Level', 'Part Number', 'Description', 'Qty'],
+    ['0', '4100-0001', 'Top assembly', '1'],
+    ['1', '4100-0100', 'Frame', '2'],
+    ['2', '4100-0110', 'Rail', '2'],
+    ['3', 'HW-0632', 'Screw', '5'],
+    ['1', '4100-1010', 'Chassis', '1'],
+    ['2', 'HW-0440', 'Nut', '6'],
+  ] }]);
+  assert.deepEqual(r.lines.map((l) => [l.partNumber, l.qtyPer]), [['4100-0001', 1], ['4100-0100', 2], ['4100-0110', 4], ['HW-0632', 20], ['4100-1010', 1], ['HW-0440', 6]]);
+  assert.equal(r.lines[3]?.notes, 'Level 3. Quantity per assembly 20: 5 in each of 4 4100-0110');
+  assert.equal(r.lines[5]?.notes, 'Level 2', 'under a parent used once, the quantity is as given');
+});
+
+test('the top assembly at level 0 multiplies nothing; SAP dots give the level', () => {
+  const top = proposeLines([{ name: 'BOM', rows: [['Level', 'Part Number', 'Description', 'Qty'], ['0', 'TOP', 'Top', '3'], ['1', 'A', 'Bracket', '2']] }]);
+  assert.deepEqual(top.lines.map((l) => l.qtyPer), [3, 2]);
+  const sap = proposeLines([{ name: 'BOM', rows: [['Level', 'Material', 'Description', 'Qty'], ['.1', 'SUB-1', 'Sub', '2'], ['..2', 'P-1', 'Pin', '3'], ['.1', 'P-2', 'Plate', '1']] }]);
+  assert.deepEqual(sap.lines.map((l) => [l.description, l.qtyPer]), [['Sub', 2], ['Pin', 6], ['Plate', 1]]);
+});
+
+test('one level throughout changes nothing', () => {
+  const r = proposeLines([{ name: 'BOM', rows: [['Level', 'Part Number', 'Description', 'Qty'], ['1', 'A', 'Bracket', '2'], ['1', 'B', 'Screw', '8']] }]);
+  assert.deepEqual(r.lines.map((l) => [l.qtyPer, l.notes]), [[2, 'Level 1'], [8, 'Level 1']]);
+});
+
+test('dotted find numbers place a row under the one it names', () => {
+  const r = proposeLines([{ name: 'BOM', rows: [
+    ['ITEM NO.', 'PART NUMBER', 'DESCRIPTION', 'QTY.'],
+    ['1', '4100-0100', 'FRAME WELDMENT', '2'],
+    ['1.1', '4100-0110', 'RAIL', '2'],
+    ['1.1.1', 'HW-0632', 'SCREW', '3'],
+    ['2', '4100-1010', 'CHASSIS', '1'],
+  ] }]);
+  assert.deepEqual(r.lines.map((l) => [l.partNumber, l.qtyPer]), [['4100-0100', 2], ['4100-0110', 4], ['HW-0632', 12], ['4100-1010', 1]]);
+  // Numbers that only look dotted (no row they name above them) change nothing.
+  const flat = proposeLines([{ name: 'BOM', rows: [['Item', 'Part Number', 'Description', 'Qty'], ['1.1', 'A', 'Bracket', '2'], ['1.2', 'B', 'Screw', '8']] }]);
+  assert.deepEqual(flat.lines.map((l) => l.qtyPer), [2, 8]);
+});
+
+test('the same screw under two subassemblies is one line with both uses added', () => {
+  const r = proposeLines([{ name: 'BOM', rows: [
+    ['Level', 'Part Number', 'Description', 'Qty'],
+    ['1', 'HV-2001-120', 'Bracket', '2'],
+    ['2', 'HW-0632', 'Screw', '3'],
+    ['1', 'HV-2001-110', 'Cover', '1'],
+    ['2', 'HW-0632', 'Screw', '4'],
+  ] }]);
+  assert.deepEqual(r.lines.map((l) => [l.partNumber, l.qtyPer]), [['HV-2001-120', 2], ['HW-0632', 10], ['HV-2001-110', 1]]);
+  assert.equal(r.lines[1]?.notes, 'Level 2. Quantity per assembly 10, listed 2 times: 3 in each of 2 HV-2001-120 + 4 in HV-2001-110');
+});
+
+test('a repeat with no quantity adds nothing; with no quantities at all, each listing counts one', () => {
+  const ref = proposeLines([{ name: 'BOM', rows: [['Part Number', 'Description', 'Qty'], ['HW-0632', 'Screw', '4'], ['HW-0632', 'Screw', 'REF']] }]);
+  assert.equal(ref.lines[0]?.qtyPer, 4);
+  assert.match(ref.lines[0]?.notes ?? '', /listed 2 times: 4 \+ 1 \(no quantity, not added\)/);
+  const none = proposeLines([{ name: 'BOM', rows: [['Ref Des', 'Part Number', 'Description'], ['R1', 'RC0603-10K', '10K'], ['R2', 'RC0603-10K', '10K'], ['R3', 'RC0603-10K', '10K']] }]);
+  assert.equal(none.lines[0]?.qtyPer, 3);
+});
+
+test('a part met again in another table on the sheet is not added up', () => {
+  const r = proposeLines([{ name: 'BOM', rows: [['FABRICATED'], ['Item', 'Part Number', 'Rev', 'Description', 'Qty Per', 'Material'], ['1', 'HW-0632', '', 'Screw', '4', ''],
+    [], ['PURCHASED'], ['Item', 'Part Number', 'Description', 'Qty Per', 'Mfr', 'Mfr P/N'], ['2', 'HW-0632', 'Screw', '4', 'McMaster', '91772A146']] }]);
+  assert.deepEqual(r.lines.map((l) => [l.partNumber, l.qtyPer]), [['HW-0632', 4]]);
 });

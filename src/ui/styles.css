@@ -160,6 +160,11 @@ button, .btn { font: inherit; }
 .btn.danger { color: var(--late); }
 .link { background: none; border: 0; padding: 0; color: var(--accent-ink); cursor: pointer; font: inherit; }
 .link:hover { text-decoration: underline; }
+/* A part row's own-quantities link shows on the row under the pointer or keyboard, always on touch screens. */
+.row-more { opacity: 0; }
+tr:hover .row-more, tr:focus-within .row-more { opacity: 1; }
+@media (hover: none) { .row-more { opacity: 1; } }
+.own-qty { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin-top: 4px; }
 .quiet-link { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: var(--text-sm); border-radius: var(--r-sm); }
 .quiet-link svg { width: 15px; height: 15px; }
 .quiet-link:hover { color: var(--ink); }
