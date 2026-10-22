@@ -637,7 +637,7 @@ export function QuotePage({ id }: { id: number }) {
           <Conversation d={d} onChange={setD} />
         </div>
       </div>
-      {pricing && <PricePanel d={d} line={d.lines.find((l) => l.id === pricing.id) ?? pricing} onClose={() => setPricing(null)} onSaved={() => { reload(); app.refreshCounts(); }} />}
+      {pricing && <PricePanel key={pricing.id} d={d} line={d.lines.find((l) => l.id === pricing.id) ?? pricing} onClose={() => setPricing(null)} onSaved={() => { reload(); app.refreshCounts(); }} />}
     </div>
   );
 }

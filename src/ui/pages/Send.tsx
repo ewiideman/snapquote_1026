@@ -257,7 +257,7 @@ export function SendPage({ id }: { id: number }) {
       {d.requests.length > 0 && <div className="row wrap small" style={{ marginTop: 12 }}><span className="muted">Departments:</span>{d.requests.map((r) => <DeptChip key={r.id} dept={r.department} status={r.status} />)}</div>}
 
       {editing && <OverrideDialog line={editing.line} cell={editing.cell} onClose={() => setEditing(null)} onDone={() => { setEditing(null); reload(); }} />}
-      {viewing && <PricePanel d={d} line={viewing} onClose={() => setViewing(null)} onSaved={reload} />}
+      {viewing && <PricePanel key={viewing.id} d={d} line={viewing} onClose={() => setViewing(null)} onSaved={reload} />}
       {closing && <CloseDialog d={d} outcome={closing} onClose={() => setClosing(null)} onDone={(n) => { setClosing(null); setD(n); app.refreshCounts(); }} />}
       {confirmSent && (
         <Dialog title="Mark as sent?" onClose={() => setConfirmSent(false)} footer={<>

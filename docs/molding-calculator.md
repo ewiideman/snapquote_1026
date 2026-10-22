@@ -60,6 +60,12 @@ it. These look wrong and should be put to ADC:
    An inserted hot runner adds nothing to the mold price.
 7. The old admin screen had fields for markup, labor rate and overhead. No price ever used them.
    Should a Molding price carry any of them, or is that business development's to add?
+8. **What unit does ADC enter molding pressure in?** The tonnage needed is 1.1 × cavities × pressure ×
+   projected area, which is tons only with pressure in tons per square inch (usually 2 to 5). The old
+   app accepted "PSI or tons/in² per your plant convention", and its own example (4,000) works out to
+   281,600 tons. SnapQuote asks for tons/in², shows the tonnage's figures, and warns when the pressure
+   is over 10 (likely PSI) or the projected area is more than length × width. Neither changes the
+   price, but both change the tonnage and which press is taken when none is chosen.
 
 ## Not ported
 

@@ -49,6 +49,13 @@ test('the Molding calculator prices a part and the mold', async ({ browser }) =>
   await expect(panel.getByText('Price each, at every quantity')).toBeVisible();
   await panel.getByLabel('Quote the china mold').check();
   await expect(panel.getByText('Mold (China), one time')).toBeVisible();
+  // Looking at "Enter prices" and coming back keeps everything typed into the calculator.
+  await panel.getByRole('button', { name: 'Enter prices' }).click();
+  await expect(panel.getByLabel('Resin')).toBeHidden();
+  await panel.getByRole('button', { name: 'Molding calculator' }).click();
+  await expect(panel.getByLabel('Resin')).toHaveValue('ABS');
+  await expect(panel.getByLabel('Pressure (tons/in²)')).toHaveValue('2.5');
+  await expect(panel.getByLabel('Quote the china mold')).toBeChecked();
   await panel.getByRole('button', { name: 'Use this price' }).click();
   await expect(adc.getByText('Price saved for HSG-1 rev A.')).toBeVisible();
   const est = (await (await adc.request.get(`/api/quotes/${qid}`)).json()).lines[0].estimate;

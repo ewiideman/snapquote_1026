@@ -78,3 +78,13 @@ test('the reference lists came over whole: 46 resins and 53 presses', () => {
   assert.equal(new Set(MOLDING_PRESSES.map((p) => p.id)).size, 53);
   assert.deepEqual(MOLDING_RESINS.filter((r) => r.pricePerLb === 0).map((r) => r.name).sort(), ['PSU - 30% GF', 'UHMWPE']);
 });
+
+test('a pressure that looks like PSI, or a projected area larger than the part, is said; the price does not move', () => {
+  const psi = priceMolding(input, MOLDING_DEFAULTS, [resin], [press165]);
+  assert.ok(psi.warnings.some((w) => /4000 looks like PSI \(4000 psi is 2 tons\/in²\)/.test(w)));
+  const tons = priceMolding({ ...input, moldingPressure: 2 }, MOLDING_DEFAULTS, [resin], [press165]);
+  assert.ok(!tons.warnings.some((w) => /PSI|Projected area/.test(w)), 'a sensible part says neither');
+  assert.equal(tons.perPart, psi.perPart);
+  const area = priceMolding({ ...input, moldingPressure: 2, footprintIn2: 40 }, MOLDING_DEFAULTS, [resin], [press165]);
+  assert.ok(area.warnings.some((w) => /Projected area \(40 in², one cavity\) is more than the part's length × width \(32 in²\)/.test(w)));
+});

@@ -1,6 +1,6 @@
 // Pricing one part, from the side of the quote page. Metals, Molding (ADC), Machining and Assembly work it out with their calculators,
 // Procurement from vendor quotes, any department can type its prices. Everyone else sees how it was priced.
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { del, get, post, put } from '../lib/api.ts';
 import { useAsync } from '../lib/useAsync.ts';
 import type { Line, QuoteDetail } from '../lib/types.ts';
@@ -19,6 +19,10 @@ export function PricePanel({ d, line, onClose, onSaved }: { d: QuoteDetail; line
   const mine = d.quote.status === 'estimating' && canEstimate(app.account, line.department);
   const tabs: Tab[] = mine ? [...(line.department === 'metals' || line.department === 'molding' || line.department === 'machining' || line.department === 'assembly' ? ['calculator' as const] : []), ...(line.department === 'procurement' ? ['vendors' as const] : []), 'manual'] : [];
   const [tab, setTab] = useState<Tab>(() => (line.estimate?.basis === 'manual' ? 'manual' : tabs[0] ?? 'manual'));
+  // A tab once opened stays mounted, only hidden, so what was typed in it survives switching tabs.
+  const [opened, setOpened] = useState<Set<Tab>>(() => new Set([tab]));
+  const open = (t: Tab) => { setTab(t); setOpened((o) => (o.has(t) ? o : new Set(o).add(t))); };
+  const pane = (t: Tab, body: ReactNode) => opened.has(t) && <div hidden={tab !== t}>{body}</div>;
   const title = `${line.partNumber || line.description || `Part ${line.position}`}${line.revision ? ` rev ${line.revision}` : ''}`;
   const sub = `${line.description && line.partNumber ? `${line.description} · ` : ''}${app.deptName(line.department)} · ${line.pieceQuantities.map(qty).join(', ')} pieces${line.qtyPer !== 1 && !line.quantities.length ? ` (${qty(line.qtyPer)} per assembly)` : ''}`;
   const saved = () => { onSaved(); onClose(); app.toast(`Price saved for ${title}.`); };
@@ -29,12 +33,12 @@ export function PricePanel({ d, line, onClose, onSaved }: { d: QuoteDetail; line
         <>
           {tabs.length > 1 && (
             <div className="tabs">
-              {tabs.map((t) => <button key={t} className={tab === t ? 'on' : ''} onClick={() => setTab(t)}>{t === 'calculator' ? `${CALC_NAME[line.department ?? ''] ?? 'Metals'} calculator` : t === 'vendors' ? 'Vendor quotes' : 'Enter prices'}</button>)}
+              {tabs.map((t) => <button key={t} className={tab === t ? 'on' : ''} onClick={() => open(t)}>{t === 'calculator' ? `${CALC_NAME[line.department ?? ''] ?? 'Metals'} calculator` : t === 'vendors' ? 'Vendor quotes' : 'Enter prices'}</button>)}
             </div>
           )}
-          {tab === 'calculator' && (line.department === 'molding' ? <MoldingCalculator line={line} onSaved={saved} /> : line.department === 'machining' ? <MachiningCalculator line={line} onSaved={saved} /> : line.department === 'assembly' ? <AssemblyCalculator line={line} onSaved={saved} /> : <MetalsCalculator line={line} onSaved={saved} />)}
-          {tab === 'vendors' && <VendorQuotes line={line} onSaved={saved} />}
-          {tab === 'manual' && <ManualPrices line={line} onSaved={saved} />}
+          {pane('calculator', line.department === 'molding' ? <MoldingCalculator line={line} onSaved={saved} /> : line.department === 'machining' ? <MachiningCalculator line={line} onSaved={saved} /> : line.department === 'assembly' ? <AssemblyCalculator line={line} onSaved={saved} /> : <MetalsCalculator line={line} onSaved={saved} />)}
+          {pane('vendors', <VendorQuotes line={line} onSaved={saved} />)}
+          {pane('manual', <ManualPrices line={line} onSaved={saved} />)}
         </>
       )}
       {!mine && !line.estimate && <div className="empty">Not priced yet.</div>}
