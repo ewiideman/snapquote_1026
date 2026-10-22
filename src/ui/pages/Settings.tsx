@@ -1,4 +1,4 @@
-// Administrators: who can sign in, the terms printed on the customer's copy, and the Metals rates.
+// Administrators: who can sign in, the terms printed on the customer's copy, the departments' markups, and their rates.
 import { useEffect, useState } from 'react';
 import { get, patch, post, put } from '../lib/api.ts';
 import { useAsync } from '../lib/useAsync.ts';
@@ -298,12 +298,65 @@ function SchedulerLink() {
   );
 }
 
+interface MarkupView {
+  department: string; name: string; updatedByName: string | null; updatedAt: string | null;
+  fields: { key: string; label: string; hint: string; pct: number; importedPct: number; max: number }[];
+}
+
+/** Each calculator's markups in one place, with Mack's figure from the old SnapQuote beside the one in use. */
+function Markups() {
+  const app = useApp();
+  const { data, reload } = useAsync(() => get<MarkupView[]>('/markups'), []);
+  const [error, setError] = useState<unknown>(null);
+  const save = async (g: MarkupView, key: string, label: string, pct: number) => {
+    setError(null);
+    try { await put(`/markups/${g.department}/${key}`, { pct }); reload(); app.toast(`${g.name}: ${label} is now ${pct}%.`); } catch (err) { setError(err); }
+  };
+  return (
+    <div className="section">
+      <header><h2>Markups</h2><span className="muted small">What each calculator adds. A change applies to prices worked out from now on; saved prices keep theirs.</span></header>
+      <ErrorBanner error={error} />
+      <table className="grid">
+        <thead><tr><th>Department</th><th>Markup</th><th className="right">In use</th><th className="right">Old SnapQuote</th></tr></thead>
+        <tbody>
+          {(data ?? []).flatMap((g) => g.fields.map((f, i) => (
+            <tr key={`${g.department}-${f.key}`}>
+              {i === 0 && <td rowSpan={g.fields.length} style={{ verticalAlign: 'top' }}><b>{g.name}</b><div className="sub">{g.updatedByName ? `Changed by ${g.updatedByName}, ${ago(g.updatedAt ?? '')}` : 'As imported'}</div></td>}
+              <td>{f.label}{f.hint && <div className="sub">{f.hint}</div>}</td>
+              <td className="right"><PercentInput label={`${g.name} ${f.label}`} value={f.pct} max={f.max} onSave={(v) => save(g, f.key, f.label, v)} /></td>
+              <td className={`right small ${f.pct === f.importedPct ? 'muted' : ''}`}>{f.importedPct}%{f.pct !== f.importedPct && ' (changed)'}</td>
+            </tr>
+          )))}
+          <tr><td><b>Procurement</b></td><td colSpan={3} className="muted small">Entered on each vendor quote when a part is priced from it: scrap, freight and markup. There is no default.</td></tr>
+          <tr><td><b>Assembly</b></td><td colSpan={3} className="muted small">Labor only, at the assembly labor rate below. No markup.</td></tr>
+        </tbody>
+      </table>
+      <div className="body muted small">No department's price carries a profit margin of its own. Business development sets the quote's price on Review and send: one part at a time, or every price at once with "Adjust every price".</div>
+    </div>
+  );
+}
+
+function PercentInput({ label, value, max, onSave }: { label: string; value: number; max: number; onSave: (v: number) => void }) {
+  const [v, setV] = useState<number | null>(value);
+  useEffect(() => setV(value), [value]);
+  const ok = v !== null && v >= 0 && v <= max;
+  return (
+    <span className="row" style={{ justifyContent: 'flex-end', gap: 4 }}>
+      <NumberInput aria-label={label} className="bare" style={{ width: 80 }} value={v} onChange={setV} />
+      <span className="muted">%</span>
+      {v !== value && ok && <button className="btn small primary" onClick={() => onSave(v)}>Save</button>}
+      {v !== null && !ok && <span className="small" style={{ color: 'var(--late)' }}>0 to {max}</span>}
+    </span>
+  );
+}
+
 export function Settings() {
   return (
     <div className="page narrow stack" style={{ gap: 16 }}>
       <h1>Settings</h1>
       <Accounts />
       <Terms />
+      <Markups />
       <SchedulerLink />
       <MetalsRates />
       <MoldingRates />

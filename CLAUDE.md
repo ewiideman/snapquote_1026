@@ -68,6 +68,15 @@ Read README.md first. This file is the rules and where things stand.
   line's notes say how. Repeats in another table or sheet are still kept once (an AVL, a flattened copy).
   `place` and `mergeSheets` in `src/quoting/bom.ts`. A part's own quantities (pieces, instead of the
   quote's breaks) are set on its row: "Own quantities…".
+- State (2026-10-22, markups): **markups are under Settings → Markups, and business development can adjust
+  every price at once** (Eric Wiideman, Oct 22). `src/persistence/markups.ts` lists each calculator's
+  percent figures (Metals material/outside processing, Molding adder and scrap, Machining's five) beside
+  the old SnapQuote's; a change sets one figure in that department's `setting/calculation` row and keeps
+  the rest (Metals reads a fraction over 1 as a percent, so its outside-processing figures stop at 100%).
+  Procurement's markup stays on each vendor quote, with no default. On Review and send, "Adjust every
+  price" (migration 0006: `quote.adjustment_pct`, reason, who, when) is a percent over every
+  department's price, applied in `buildSheet`, so a department's later change follows it; a part's own
+  price wins; one-time charges are not adjusted; it is said in the conversation and the audit.
 - **On-prem only. Period.** The app, PostgreSQL and attached files run on Mack's server. No cloud
   service, no outside API, no CDN at run time. Libraries are npm packages bundled at build.
 - **American English** everywhere: code, comments, screens, docs.

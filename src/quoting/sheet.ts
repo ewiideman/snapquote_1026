@@ -61,10 +61,12 @@ export interface SheetCell {
   quantity: number;
   /** The department's price, or null. */
   estimated: number | null;
+  /** The department's price with the quote's adjustment, or null without one. */
+  adjusted: number | null;
   /** Business development's price, or null. */
   override: number | null;
   overrideReason: string | null;
-  /** What the customer is quoted: the override if set, else the estimate, else null (missing). */
+  /** What the customer is quoted: the override if set, else the (adjusted) estimate, else null (missing). */
   unitPrice: number | null;
   extended: number | null;
 }
@@ -99,14 +101,19 @@ export interface Sheet {
 
 const money = (n: number): number => Math.round(n * 10000) / 10000;
 
-export function buildSheet(quoteQuantities: readonly number[], lines: readonly PricedLine[]): Sheet {
+/**
+ * `adjustmentPct`: business development's percent over every department's price (none when null). A part's
+ * own override wins over it; one-time charges are not adjusted.
+ */
+export function buildSheet(quoteQuantities: readonly number[], lines: readonly PricedLine[], adjustmentPct: number | null = null): Sheet {
   const sheetLines: SheetLine[] = lines.map((line) => {
     const cells = lineQuantities(quoteQuantities, line).map((quantity): SheetCell => {
       const key = qtyKey(quantity);
       const estimated = line.estimate?.prices.get(key) ?? null;
       const ov = line.overrides.get(key) ?? null;
-      const unitPrice = ov ? ov.unitPrice : estimated;
-      return { quantity, estimated, override: ov?.unitPrice ?? null, overrideReason: ov?.reason ?? null, unitPrice, extended: unitPrice === null ? null : money(unitPrice * quantity) };
+      const adjusted = adjustmentPct !== null && estimated !== null ? money(estimated * (1 + adjustmentPct / 100)) : null;
+      const unitPrice = ov ? ov.unitPrice : adjusted ?? estimated;
+      return { quantity, estimated, adjusted, override: ov?.unitPrice ?? null, overrideReason: ov?.reason ?? null, unitPrice, extended: unitPrice === null ? null : money(unitPrice * quantity) };
     });
     return { lineId: line.id, cells, oneTimeCost: line.estimate?.oneTimeCost ?? 0, oneTimeLabel: line.estimate?.oneTimeLabel ?? '', leadTimeWeeks: line.estimate?.leadTimeWeeks ?? null };
   });

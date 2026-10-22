@@ -70,3 +70,14 @@ test('quantities typed freely', () => {
   assert.deepEqual(parseQuantities('2.5k'), { quantities: [2500], problem: null });
   assert.equal(parseQuantities('lots').problem, '"lots" is not a quantity.');
 });
+
+test("business development's adjustment moves every department's price; a part's own price still wins", () => {
+  const lines = [priced(1, 2, [[200, 1.5]]), priced(2, 1, [[100, 10]], { overrides: new Map([[qtyKey(100), { unitPrice: 9, reason: 'match last year' }]]) })];
+  const s = buildSheet([100], lines, 10);
+  assert.deepEqual(s.lines.map((l) => [l.cells[0]?.estimated, l.cells[0]?.adjusted, l.cells[0]?.unitPrice]), [[1.5, 1.65, 1.65], [10, 11, 9]]);
+  assert.equal(s.assembly?.[0]?.unitPrice, 1.65 * 2 + 9);
+  const off = buildSheet([100], [priced(1, 1, [[100, 10]], { estimate: { prices: new Map([[qtyKey(100), 10]]), oneTimeCost: 500, oneTimeLabel: 'Mold', leadTimeWeeks: null } })], -5);
+  assert.equal(off.lines[0]?.cells[0]?.unitPrice, 9.5);
+  assert.equal(off.oneTimeTotal, 500, 'one-time charges are not adjusted');
+  assert.equal(buildSheet([100], [priced(1, 1, [])], 10).lines[0]?.cells[0]?.unitPrice, null, 'a missing price stays missing');
+});

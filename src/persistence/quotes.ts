@@ -56,6 +56,8 @@ export interface QuoteHeader {
   deletedAt: string | null;
   deletedByName: string | null;
   deleteReason: string | null;
+  /** Business development's percent over every department's price, or null. */
+  adjustment: { pct: number; reason: string; setByName: string; setAt: string } | null;
 }
 
 export interface Line {
@@ -124,11 +126,12 @@ type QuoteRow = {
   source_email: { subject: string; from: string; date: string | null } | null; sent_at: string | null; closed_at: string | null; close_reason: string | null; po_number: string | null;
   award_amount: string | null; ordered_quantity: number | null; created_at: string; updated_at: string;
   deleted_at: string | null; deleted_by_name: string | null; delete_reason: string | null;
+  adjustment_pct: string | null; adjustment_reason: string | null; adjustment_set_by_name: string | null; adjustment_set_at: string | null;
 };
 
-const QUOTE_SELECT = `SELECT q.*, c.name AS customer_name, u.display_name AS owner_name, d.display_name AS deleted_by_name
+const QUOTE_SELECT = `SELECT q.*, c.name AS customer_name, u.display_name AS owner_name, d.display_name AS deleted_by_name, aj.display_name AS adjustment_set_by_name
   FROM quote.quote q LEFT JOIN quote.customer c ON c.id = q.customer_id JOIN app.user_account u ON u.id = q.owner_id
-  LEFT JOIN app.user_account d ON d.id = q.deleted_by`;
+  LEFT JOIN app.user_account d ON d.id = q.deleted_by LEFT JOIN app.user_account aj ON aj.id = q.adjustment_set_by`;
 
 const toHeader = (r: QuoteRow): QuoteHeader => ({
   id: r.id, number: r.number, revision: r.revision, customerId: r.customer_id, customerName: r.customer_name, title: r.title, contactName: r.contact_name, contactEmail: r.contact_email,
@@ -136,6 +139,7 @@ const toHeader = (r: QuoteRow): QuoteHeader => ({
   status: r.status, sourceEmail: r.source_email, sentAt: r.sent_at, closedAt: r.closed_at, closeReason: r.close_reason, poNumber: r.po_number, awardAmount: numOrNull(r.award_amount),
   orderedQuantity: r.ordered_quantity, createdAt: r.created_at, updatedAt: r.updated_at,
   deletedAt: r.deleted_at, deletedByName: r.deleted_by_name, deleteReason: r.delete_reason,
+  adjustment: r.adjustment_pct === null ? null : { pct: Number(r.adjustment_pct), reason: r.adjustment_reason ?? '', setByName: r.adjustment_set_by_name ?? '', setAt: r.adjustment_set_at ?? '' },
 });
 
 async function header(db: Queryable, id: number, lock = false): Promise<QuoteHeader> {
@@ -199,7 +203,7 @@ export async function quoteDetail(db: Queryable, id: number): Promise<QuoteDetai
     estimate: l.estimate ? { prices: new Map(l.estimate.prices.map((p) => [qtyKey(p.quantity), p.unitPrice])), oneTimeCost: l.estimate.oneTimeCost, oneTimeLabel: l.estimate.oneTimeLabel, leadTimeWeeks: l.estimate.leadTimeWeeks } : null,
     overrides: new Map(overrides.filter((o) => o.lineId === l.id).map((o) => [qtyKey(o.quantity), { unitPrice: o.unitPrice, reason: o.reason }])),
   }));
-  return { quote, stage: stageOf(quote.status, requests), lines, requests, attachments, messages, overrides, sheet: buildSheet(quote.quantities, priced) };
+  return { quote, stage: stageOf(quote.status, requests), lines, requests, attachments, messages, overrides, sheet: buildSheet(quote.quantities, priced, quote.adjustment?.pct ?? null) };
 }
 
 // ---------------------------------------------------------------- the board and the queue
@@ -653,6 +657,31 @@ export async function setOverride(db: Database, actor: Account, lineId: number, 
     }
     await touch(tx, q.id);
     await audit(tx, actor.id, 'price_override.set', 'line', lineId, { quantity, unitPrice: input.unitPrice ?? null });
+  });
+}
+
+/** Business development's percent over every department's price, with the reason; null clears it. */
+export async function setAdjustment(db: Database, actor: Account, quoteId: number, input: { percent?: unknown; reason?: unknown }): Promise<void> {
+  requireSeller(actor);
+  const clear = input.percent === null || input.percent === undefined || input.percent === '';
+  const percent = clear ? null : Number(input.percent);
+  if (percent !== null && (!Number.isFinite(percent) || percent <= -100 || percent > 1000)) throw new HttpError(400, 'The adjustment is a percent above -100 and at most 1,000.');
+  if (percent === 0) throw new HttpError(400, 'An adjustment of 0% changes nothing. Take it off instead.');
+  const reason = percent === null ? null : optText(input.reason, 500);
+  if (percent !== null && !reason) throw new HttpError(400, 'Say why every price changes.');
+  await db.transaction(async (tx) => {
+    const q = await header(tx, quoteId, true);
+    if (q.status !== 'estimating' && q.status !== 'draft') throw new HttpError(409, q.status === 'sent' ? 'This quote has been sent. Revise it to change a price.' : 'This quote is closed.');
+    const pct = percent === null ? null : Math.round(percent * 1000) / 1000;
+    const before = q.adjustment;
+    if (pct === null && !before) return;
+    await tx.query('UPDATE quote.quote SET adjustment_pct = $2, adjustment_reason = $3, adjustment_set_by = $4, adjustment_set_at = CASE WHEN $2::numeric IS NULL THEN NULL ELSE now() END, updated_at = now() WHERE id = $1',
+      [quoteId, pct, reason, pct === null ? null : actor.id]);
+    const words = (p: number) => `${p > 0 ? '+' : ''}${p}%`;
+    await event(tx, quoteId, actor.id, pct === null
+      ? `${actor.displayName} took off the ${words(before?.pct ?? 0)} adjustment: prices are the departments' again.`
+      : `${actor.displayName} set every price to the departments' ${words(pct)}: ${reason}`);
+    await audit(tx, actor.id, 'quote.adjusted', 'quote', quoteId, { percent: pct, reason, before: before?.pct ?? null });
   });
 }
 

@@ -12,11 +12,12 @@ import {
 } from '../persistence/accounts.ts';
 import {
   answerRequest, assignRequest, board, closeQuote, createQuote, deletedQuotes, deleteQuote, restoreQuote, customers, LOST_REASONS, markSent, postMessage, queue, quoteDetail, reviseQuote, saveEstimate, saveLines,
-  sendToEstimating, setOverride, updateHeader,
+  sendToEstimating, setAdjustment, setOverride, updateHeader,
 } from '../persistence/quotes.ts';
 import { attachmentFile, dropFile, MAX_FILE_BYTES, readStored, removeAttachment } from '../persistence/files.ts';
 import { addVendorQuote, priceFromVendor, removeVendorQuote, suppliers, vendorQuotes } from '../persistence/procurement.ts';
 import { quoteTerms, referenceRows, setReference } from '../persistence/reference.ts';
+import { markups, setMarkup } from '../persistence/markups.ts';
 import { quotePdf } from '../quoting/pdf.ts';
 import { DEPARTMENTS, isDepartment } from '../quoting/departments.ts';
 import { metalsRoutes } from './metalsRoutes.ts';
@@ -247,6 +248,11 @@ export function createApp(db: Database, options: AppOptions): express.Express {
     await saveEstimate(db, me(res), id(req), body(req));
     res.json({ ok: true });
   });
+  api.put('/quotes/:id/adjustment', async (req, res) => {
+    const b = body(req);
+    await setAdjustment(db, me(res), id(req), { percent: b['percent'], reason: b['reason'] });
+    res.json(await quoteDetail(db, id(req)));
+  });
   api.put('/lines/:id/override', async (req, res) => {
     const b = body(req);
     await setOverride(db, me(res), id(req), { quantity: b['quantity'], unitPrice: b['unitPrice'], reason: b['reason'] });
@@ -331,6 +337,13 @@ export function createApp(db: Database, options: AppOptions): express.Express {
     if (typeof text !== 'string' || text.length > 5000) throw new HttpError(400, 'Terms are text, at most 5,000 characters.');
     await setReference(db, a, { department: 'quote', kind: 'setting', key: 'terms', data: { text } });
     res.json({ text });
+  });
+  api.get('/markups', async (_req, res) => {
+    res.json(await markups(db));
+  });
+  api.put('/markups/:department/:key', async (req, res) => {
+    await setMarkup(db, requireAdministrator(res), String(req.params['department']), String(req.params['key']), body(req)['pct']);
+    res.json(await markups(db));
   });
   api.get('/reference/:department', async (req, res) => {
     res.json(await referenceRows(db, String(req.params['department'])));

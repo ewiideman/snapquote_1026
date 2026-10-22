@@ -33,7 +33,7 @@ export interface Request { id: number; department: DepartmentKey; status: Reques
 export interface Attachment { id: number; lineId: number | null; fileName: string; contentType: string; sizeBytes: number; source: 'upload' | 'email'; uploadedByName: string; uploadedAt: string }
 export interface Message { id: number; department: string | null; authorName: string; kind: 'note' | 'question' | 'answer' | 'event'; body: string; at: string }
 
-export interface SheetCell { quantity: number; estimated: number | null; override: number | null; overrideReason: string | null; unitPrice: number | null; extended: number | null }
+export interface SheetCell { quantity: number; estimated: number | null; adjusted: number | null; override: number | null; overrideReason: string | null; unitPrice: number | null; extended: number | null }
 export interface Sheet {
   lines: { lineId: number; cells: SheetCell[]; oneTimeCost: number; oneTimeLabel: string; leadTimeWeeks: number | null }[];
   assembly: { quantity: number; unitPrice: number | null; extended: number | null }[] | null;
@@ -46,6 +46,7 @@ export interface QuoteHeader {
   status: 'draft' | 'estimating' | 'sent' | 'won' | 'lost' | 'no_bid'; sourceEmail: { subject: string; from: string; date: string | null } | null;
   sentAt: string | null; closedAt: string | null; closeReason: string | null; poNumber: string | null; awardAmount: number | null; orderedQuantity: number | null; createdAt: string; updatedAt: string;
   deletedAt: string | null; deletedByName: string | null; deleteReason: string | null;
+  adjustment: { pct: number; reason: string; setByName: string; setAt: string } | null;
 }
 
 export interface QuoteDetail {

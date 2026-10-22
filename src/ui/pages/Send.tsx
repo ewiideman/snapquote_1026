@@ -16,13 +16,59 @@ function PriceCell({ cell, editable, onEdit }: { cell: SheetCell; editable: bool
   const body = cell.unitPrice === null ? <span>missing</span> : (
     <>
       {cell.override !== null && cell.estimated !== null && <span className="was">{usd(cell.estimated)}</span>}
-      <span className={cell.override !== null ? 'ov' : ''} title={cell.overrideReason ?? undefined}>{usd(cell.unitPrice)}</span>
+      <span className={cell.override !== null ? 'ov' : ''} title={cell.overrideReason ?? (cell.adjusted !== null && cell.estimated !== null ? `The department's ${usd(cell.estimated)}, adjusted` : undefined)}>{usd(cell.unitPrice)}</span>
     </>
   );
   return (
     <td className={`price${cell.unitPrice === null ? ' missing' : ''}`}>
       {editable ? <button className="pricebtn" onClick={onEdit} title="Set your own price">{body}</button> : body}
     </td>
+  );
+}
+
+const signed = (p: number) => `${p > 0 ? '+' : ''}${p}%`;
+
+/** Business development's percent over every department's price, with the reason. */
+function AdjustDialog({ d, onClose, onDone }: { d: QuoteDetail; onClose: () => void; onDone: (n: QuoteDetail) => void }) {
+  const now = d.quote.adjustment;
+  const [pct, setPct] = useState<number | null>(now?.pct ?? null);
+  const [reason, setReason] = useState(now?.reason ?? '');
+  const [error, setError] = useState<unknown>(null);
+  const send = async (percent: number | null) => {
+    try { onDone(await put<QuoteDetail>(`/quotes/${d.quote.id}/adjustment`, { percent, reason })); } catch (err) { setError(err); }
+  };
+  // What the first quantity comes to, before and after, worked out the way the server does.
+  const first = d.sheet.assembly?.[0];
+  const before = d.sheet.assembly ? d.lines.reduce<number | null>((s, l, i) => {
+    const c = d.sheet.lines[i]?.cells[0];
+    const own = c?.override ?? c?.estimated ?? null;
+    return s === null || own === null ? null : s + own * l.qtyPer;
+  }, 0) : null;
+  const after = d.sheet.assembly && pct !== null ? d.lines.reduce<number | null>((s, l, i) => {
+    const c = d.sheet.lines[i]?.cells[0];
+    const own = c?.override ?? (c?.estimated === null || c?.estimated === undefined ? null : c.estimated * (1 + pct / 100));
+    return s === null || own === null || own === undefined ? null : s + own * l.qtyPer;
+  }, 0) : null;
+  const ok = pct !== null && pct !== 0 && pct > -100 && pct <= 1000 && reason.trim();
+  return (
+    <Dialog title="Adjust every price" onClose={onClose} footer={
+      <>
+        {now && <button className="btn ghost" onClick={() => send(null)}>Take it off</button>}
+        <span className="grow" />
+        <button className="btn" onClick={onClose}>Cancel</button>
+        <button className="btn primary" disabled={!ok} onClick={() => send(pct)}>{now ? 'Change it' : 'Adjust every price'}</button>
+      </>
+    }>
+      <p className="muted">Every part's price becomes the department's price plus this percent, at every quantity. Use a minus sign to take off. Prices you set yourself stay as you set them; one-time charges are not changed. If a department changes its price later, the adjustment follows.</p>
+      <div className="grid2">
+        <label className="field">Percent<NumberInput aria-label="Percent" value={pct} onChange={setPct} placeholder="e.g. 8 or -5" /></label>
+        <div className="field small" style={{ justifyContent: 'flex-end', display: 'flex', flexDirection: 'column' }}>
+          {first && before !== null && after !== null && <span>At {qty(first.quantity)}: {usd(before)} → <b>{usd(after)}</b> an assembly</span>}
+        </div>
+      </div>
+      <label className="field">Why (everyone on the quote sees this)<input aria-label="Why" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. Target margin for this customer" /></label>
+      <ErrorBanner error={error} />
+    </Dialog>
   );
 }
 
@@ -127,6 +173,7 @@ export function SendPage({ id }: { id: number }) {
   const [viewing, setViewing] = useState<Line | null>(null);
   const [closing, setClosing] = useState<null | 'won' | 'lost' | 'no_bid'>(null);
   const [confirmSent, setConfirmSent] = useState(false);
+  const [adjusting, setAdjusting] = useState(false);
   const [actionError, setActionError] = useState<unknown>(null);
   useEffect(() => { if (data) setD(data); }, [data]);
   if (error) return <div className="page"><ErrorBanner error={error} /></div>;
@@ -174,8 +221,15 @@ export function SendPage({ id }: { id: number }) {
       <div className="section sheet" style={{ marginBottom: 16 }}>
         <header>
           <h2>Prices</h2>
-          <span className="muted small">{editable ? 'Click a price to set your own. ' : ''}{overrides ? `${overrides} of your own price${overrides === 1 ? '' : 's'}, in blue.` : ''}</span>
+          <span className="muted small grow">{editable ? 'Click a price to set your own. ' : ''}{overrides ? `${overrides} of your own price${overrides === 1 ? '' : 's'}, in blue.` : ''}</span>
+          {editable && <button className="btn small" onClick={() => setAdjusting(true)}>{q.adjustment ? 'Change the adjustment' : 'Adjust every price…'}</button>}
         </header>
+        {q.adjustment && (
+          <div className="banner info adjust-note">
+            Every price is the department's <b>{signed(q.adjustment.pct)}</b>: {q.adjustment.reason} <span className="muted">({q.adjustment.setByName}, {ago(q.adjustment.setAt)})</span>
+            {overrides > 0 && <span className="muted"> Your own prices, in blue, stay as you set them.</span>}
+          </div>
+        )}
         {assembly ? (
           <table className="grid">
             <thead>
@@ -257,6 +311,7 @@ export function SendPage({ id }: { id: number }) {
       {d.requests.length > 0 && <div className="row wrap small" style={{ marginTop: 12 }}><span className="muted">Departments:</span>{d.requests.map((r) => <DeptChip key={r.id} dept={r.department} status={r.status} />)}</div>}
 
       {editing && <OverrideDialog line={editing.line} cell={editing.cell} onClose={() => setEditing(null)} onDone={() => { setEditing(null); reload(); }} />}
+      {adjusting && <AdjustDialog d={d} onClose={() => setAdjusting(false)} onDone={(n) => { setAdjusting(false); setD(n); app.toast(n.quote.adjustment ? `Every price is now the departments' ${signed(n.quote.adjustment.pct)}.` : "Prices are the departments' again."); }} />}
       {viewing && <PricePanel key={viewing.id} d={d} line={viewing} onClose={() => setViewing(null)} onSaved={reload} />}
       {closing && <CloseDialog d={d} outcome={closing} onClose={() => setClosing(null)} onDone={(n) => { setClosing(null); setD(n); app.refreshCounts(); }} />}
       {confirmSent && (
