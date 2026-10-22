@@ -92,7 +92,7 @@ function Steps({ d }: { d: QuoteDetail }) {
   const idx = order.indexOf(now);
   const labels: Record<(typeof order)[number], string> = { draft: 'Put together', estimating: 'Departments price it', ready: 'Review and send', sent: 'With the customer', closed: 'Outcome' };
   const subs: Partial<Record<(typeof order)[number], string>> = {
-    estimating: d.requests.length ? `${d.requests.filter((r) => r.status === 'answered').length} of ${d.requests.length} priced` : '',
+    estimating: d.requests.length ? `${d.requests.filter((r) => r.status === 'answered').length} of ${d.requests.length} departments done` : '',
     sent: d.quote.sentAt ? `since ${shortDate(d.quote.sentAt)}` : '',
     closed: d.stage === 'won' ? 'Won' : d.stage === 'lost' ? 'Lost' : d.stage === 'no_bid' ? 'No bid' : '',
   };
@@ -129,10 +129,27 @@ function NextStep({ d, lines, reload, setError, dirty }: { d: QuoteDetail; lines
     try { reload(await fn()); app.refreshCounts(); } catch (err) { setError(err); }
   };
   const myRequest = d.requests.find((r) => canEstimate(app.account, r.department) && app.account.role === 'estimator');
+  const isPriced = (l: Line) => !!l.estimate && l.pieceQuantities.every((q) => l.estimate?.prices.some((p) => Math.abs(p.quantity - q) < 0.005));
+  // A manager or administrator who priced a department's parts sends them back for it, as its estimator would.
+  const owner = d.quote.ownerName.split(' ')[0];
+  const sendBack = d.quote.status === 'estimating' && app.account.role !== 'estimator'
+    ? d.requests.filter((r) => r.status === 'open' && canEstimate(app.account, r.department) && d.lines.some((l) => l.department === r.department) && d.lines.filter((l) => l.department === r.department).every(isPriced))
+    : [];
+  // One button for all of them: each department's prices go back in turn, as its estimator's would.
+  const possessive = (name: string) => `${name}${name.endsWith('s') ? "'" : "'s"}`;
+  const selfOwned = d.quote.ownerId === app.account.id;
+  const who = sendBack.length === 1 ? app.deptName(sendBack[0]?.department ?? null) : sendBack.length === 2 ? 'both departments' : `all ${sendBack.length} departments`;
+  const sendBackButtons = sendBack.length > 0 && (
+    <button className="btn" onClick={() => run(async () => {
+      let last: QuoteDetail | null = null;
+      for (const r of sendBack) last = await post<QuoteDetail>(`/quotes/${d.quote.id}/requests/${r.department}/answer`);
+      return last as QuoteDetail;
+    })}>{selfOwned ? `Mark ${who} done` : `Send ${sendBack.length === 1 ? possessive(who) : `${who}'`} prices to ${owner}`}</button>
+  );
 
   if (myRequest && d.quote.status === 'estimating') {
     const mine = d.lines.filter((l) => l.department === myRequest.department);
-    const priced = mine.filter((l) => l.estimate && l.pieceQuantities.every((q) => l.estimate?.prices.some((p) => Math.abs(p.quantity - q) < 0.005))).length;
+    const priced = mine.filter(isPriced).length;
     if (myRequest.status === 'answered') {
       return <div className="next calm"><p><b>✓ {app.deptName(myRequest.department)} has priced its parts.</b><span className="muted">Changing a price now tells {d.quote.ownerName.split(' ')[0]}.</span></p></div>;
     }
@@ -168,10 +185,23 @@ function NextStep({ d, lines, reload, setError, dirty }: { d: QuoteDetail; lines
     if (questions.length) {
       return <div className="next" style={{ borderColor: 'var(--ask-line)', boxShadow: '0 0 0 3px var(--ask-soft)' }}><p><b>{questions.map((r) => app.deptName(r.department)).join(' and ')} asked you something.</b><span className="muted">Answer in the conversation; your reply sends it back to them.</span></p><a className="btn" href="#conversation">Answer</a></div>;
     }
+    const names = (rs: typeof waiting) => rs.map((r) => app.deptName(r.department)).join(', ');
+    // Every part has a price: the next step is the review, whether or not each department has said it is done.
+    if (d.sheet.complete) {
+      return (
+        <div className="next">
+          <p><b>Every part has a price.</b>
+            <span className="muted">{waiting.length <= 2 ? names(waiting) : `${waiting.length} departments`} {waiting.length === 1 ? "hasn't" : "haven't"} marked {waiting.length === 1 ? 'its' : 'their'} prices done{sendBack.length ? '' : ', so a price may still change'}. You can review and send now.</span></p>
+          {sendBackButtons}
+          <a className="btn primary" href={`#/quotes/${d.quote.id}/send`}>Review and send</a>
+        </div>
+      );
+    }
     return (
       <div className="next calm">
-        <p><b>Waiting on {waiting.map((r) => app.deptName(r.department)).join(', ')}.</b>
+        <p><b>Waiting on {names(waiting)}.</b>
           <span className="muted">You can still change the parts; a department whose parts change gets the quote back.</span></p>
+        {sendBackButtons}
         <a className="btn" href={`#/quotes/${d.quote.id}/send`}>See prices so far</a>
       </div>
     );

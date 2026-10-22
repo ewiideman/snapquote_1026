@@ -35,3 +35,28 @@ test("a part's own quantities are entered on the row and cleared again", async (
   await expect.poll(async () => (await (await jon.request.get(`/api/quotes/${qid}`)).json()).lines[0].pieceQuantities).toEqual([100, 500]);
   await expect(row.getByText('own', { exact: true })).toBeHidden();
 });
+
+test('a manager who priced every part is shown Review and send, and sends the departments back with one button', async ({ browser }) => {
+  const jon = await signIn(browser, 'jon');
+  const qid = (await (await jon.request.post('/api/quotes', { data: {} })).json()).id;
+  await jon.request.patch(`/api/quotes/${qid}`, { data: { customerName: 'Locus Robotics', quantities: [100] } });
+  await jon.request.put(`/api/quotes/${qid}/lines`, { data: { lines: [
+    { partNumber: 'HW-1', revision: '', description: 'Screw', qtyPer: 4, notes: '', department: 'procurement' },
+    { partNumber: 'ASM-1', revision: '', description: 'Final assembly', qtyPer: 1, notes: '', department: 'assembly' },
+  ] } });
+  expect((await jon.request.post(`/api/quotes/${qid}/send-to-estimating`, { data: {} })).status()).toBe(200);
+
+  const boss = await signIn(browser, 'boss');
+  const lines = (await (await boss.request.get(`/api/quotes/${qid}`)).json()).lines;
+  for (const l of lines) {
+    expect((await boss.request.put(`/api/lines/${l.id}/estimate`, { data: { basis: 'manual', prices: l.pieceQuantities.map((q: number) => ({ quantity: q, unitPrice: 2.5 })) } })).status()).toBe(200);
+  }
+  await boss.goto(`/#/quotes/${qid}`);
+  const next = boss.locator('.next');
+  await expect(next.getByText('Every part has a price.')).toBeVisible();
+  await expect(next.getByRole('link', { name: 'Review and send' })).toBeVisible();
+  await expect(next.getByText("Procurement, Assembly haven't marked their prices done. You can review and send now.")).toBeVisible();
+  await next.getByRole('button', { name: "Send both departments' prices to Jon" }).click();
+  await expect(next.getByText('Every department has priced it.')).toBeVisible();
+  expect((await (await boss.request.get(`/api/quotes/${qid}`)).json()).stage).toBe('ready');
+});
