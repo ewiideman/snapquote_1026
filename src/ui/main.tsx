@@ -122,7 +122,7 @@ function App() {
                 : <NavLink href="#/queue" icon="inbox" label="My queue" on={on('/') || on('/queue')} count={counts.queue} countTitle="waiting on your department" />}
               {seller && account.role !== 'sales' && <NavLink href="#/queue" icon="inbox" label="Department queues" on={on('/queue')} />}
               {!seller && <NavLink href="#/board" icon="board" label="All quotes" on={on('/board')} />}
-              {((account.role === 'estimator' && account.department === 'metals') || account.role === 'manager' || account.role === 'administrator') && <NavLink href="#/work-cells" icon="cells" label="Work cells" on={on('/work-cells')} />}
+              {((account.role === 'estimator' && ['metals', 'molding', 'machining', 'assembly'].includes(account.department ?? '')) || account.role === 'manager' || account.role === 'administrator') && <NavLink href="#/work-cells" icon="cells" label="Work cells" on={on('/work-cells')} />}
               {account.role === 'administrator' && <NavLink href="#/settings" icon="settings" label="Settings" on={on('/settings')} />}
             </nav>
             <div className="side-foot">

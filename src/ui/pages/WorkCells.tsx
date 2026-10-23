@@ -1,16 +1,23 @@
-// Chris Glaski's table: which XA facilities each Metals work cell is, so a quote's hours land on the
-// machines the Production Scheduler schedules. Nothing here is matched by name.
+// Each department's table of which XA facilities its work cells are (Metals work cells, Molding (ADC)
+// presses, Machining machines, Assembly), so a quote's hours land on the machines the Production
+// Scheduler schedules. Chris Glaski keeps Metals'. Nothing here is matched by name.
 import { useMemo, useState } from 'react';
 import { get, put } from '../lib/api.ts';
 import { useAsync } from '../lib/useAsync.ts';
 import { ErrorBanner, useApp } from '../components/ui.tsx';
 import { ago, qty } from '../lib/format.ts';
-import { caughtUpWords, loadTone, metalsFacilities, pct, workCellCapacity, type CapacityRead, type Mapping } from '../lib/capacity.ts';
+import { caughtUpWords, facilitiesOf, loadTone, pct, workCellCapacity, type CapacityRead, type Mapping } from '../lib/capacity.ts';
 
-interface Data { capacity: CapacityRead; workCells: { name: string; mapping: Mapping | null }[] }
+interface Data { department: string; capacity: CapacityRead; workCells: { name: string; detail?: string; mapping: Mapping | null }[] }
 
-function Picker({ cell, current, read, onSave, onClose }: { cell: string; current: string[] | null; read: CapacityRead; onSave: (f: string[] | null) => void; onClose: () => void }) {
-  const all = metalsFacilities(read);
+const DEPARTMENTS_WITH_CELLS = ['metals', 'molding', 'machining', 'assembly'] as const;
+const CELL_WORD: Record<string, { one: string; many: string }> = {
+  metals: { one: 'work cell', many: 'Work cells' }, molding: { one: 'press', many: 'Presses' }, machining: { one: 'machine', many: 'Machines' }, assembly: { one: 'work cell', many: 'Assembly' },
+};
+
+function Picker({ cell, department, current, read, onSave, onClose }: { cell: string; department: string; current: string[] | null; read: CapacityRead; onSave: (f: string[] | null) => void; onClose: () => void }) {
+  const all = facilitiesOf(read, department);
+  const word = CELL_WORD[department]?.one ?? 'work cell';
   const [chosen, setChosen] = useState<string[]>(current ?? []);
   const [typed, setTyped] = useState('');
   const [find, setFind] = useState('');
@@ -20,7 +27,7 @@ function Picker({ cell, current, read, onSave, onClose }: { cell: string; curren
     <>
       <div className="scrim" onClick={onClose} />
       <div className="dialog" role="dialog" aria-modal="true" style={{ width: 'min(620px, 94vw)' }}>
-        <header><h2>{cell}</h2><p className="muted small">Choose the XA facilities this work cell is. Several when the work cell is more than one machine.</p></header>
+        <header><h2>{cell}</h2><p className="muted small">Choose the XA facilities this {word} is. Several when it is more than one machine.</p></header>
         <div className="body">
           {all.length > 0 ? (
             <>
@@ -50,7 +57,7 @@ function Picker({ cell, current, read, onSave, onClose }: { cell: string; curren
           {chosen.length > 0 && <div className="row wrap">{chosen.map((c) => <span key={c} className="chip">{c} <button className="link" onClick={() => toggle(c)} aria-label={`Remove ${c}`}>×</button></span>)}</div>}
         </div>
         <footer>
-          <button className="btn ghost" onClick={() => onSave([])} title="The scheduler does not schedule this work cell">Not a scheduled facility</button>
+          <button className="btn ghost" onClick={() => onSave([])} title={`The scheduler does not schedule this ${word}`}>Not a scheduled facility</button>
           {current !== null && <button className="btn ghost" onClick={() => onSave(null)}>Clear</button>}
           <span className="grow" />
           <button className="btn" onClick={onClose}>Cancel</button>
@@ -63,36 +70,43 @@ function Picker({ cell, current, read, onSave, onClose }: { cell: string; curren
 
 export function WorkCells() {
   const app = useApp();
-  const { data, error, reload } = useAsync(() => get<Data>('/metals/facilities'), []);
+  const a = app.account;
+  // An estimator ties their own department's; managers and administrators every department's.
+  const mine = DEPARTMENTS_WITH_CELLS.filter((d) => a.role !== 'estimator' || a.department === d);
+  const [dept, setDept] = useState<string>(mine[0] ?? 'metals');
+  const { data, error, reload } = useAsync(() => get<Data>(`/facilities/${dept}`), [dept]);
   const [editing, setEditing] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<unknown>(null);
-  const names = useMemo(() => new Map(metalsFacilities(data?.capacity).map((f) => [f.code, f.name])), [data]);
+  const names = useMemo(() => new Map(facilitiesOf(data?.capacity, dept).map((f) => [f.code, f.name])), [data, dept]);
+  const word = CELL_WORD[dept] ?? { one: 'work cell', many: 'Work cells' };
+  const current = data && data.department === dept ? data : null;
   const read = data?.capacity;
   const file = read && read.connected ? read.file : null;
-  const tied = (data?.workCells ?? []).filter((w) => w.mapping).length;
+  const tied = (current?.workCells ?? []).filter((w) => w.mapping).length;
   return (
     <div className="page narrow stack" style={{ gap: 16 }}>
       <div className="hello">
         <div>
-          <h1>Metals work cells and XA facilities</h1>
-          <p>Tie each work cell on the rate sheet to the XA facilities the Production Scheduler schedules. Quotes priced with the calculator then show the plant's load, and the scheduler sees their hours.</p>
+          <h1>Work cells and XA facilities</h1>
+          <p>Tie each {word.one} to the XA facilities the Production Scheduler schedules. Quotes priced with the calculator then show the plant's load, and the scheduler sees their hours.</p>
         </div>
       </div>
+      {mine.length > 1 && <div className="seg" role="tablist">{mine.map((d) => <button key={d} role="tab" aria-selected={dept === d} className={dept === d ? 'on' : ''} onClick={() => { setDept(d); setEditing(null); }}>{app.deptName(d)}</button>)}</div>}
       {read && !read.connected && <div className="banner warn">This server is not linked to the Production Scheduler (MACK_EXCHANGE_DIR is not set). The table can still be filled in.</div>}
       {read && read.connected && !file && <div className="banner warn">{read.problem}</div>}
-      {file && <div className="banner info">Facilities and load from the scheduler's {file.departments.find((d) => d.key === 'metals')?.scheduleName ?? 'schedule'}, written {ago(file.writtenAt)}. {file.basis}</div>}
+      {file && <div className="banner info">Facilities and load from the scheduler's {file.departments.find((d) => d.key === dept)?.scheduleName ?? 'schedule'}, written {ago(file.writtenAt)}. {file.basis}</div>}
       <ErrorBanner error={error ?? saveError} />
       <div className="section">
-        <header><h2>Work cells</h2><span className="muted small">{data ? `${tied} of ${data.workCells.length} tied` : ''}</span></header>
+        <header><h2>{word.many}</h2><span className="muted small">{current ? `${tied} of ${current.workCells.length} tied` : ''}</span></header>
         <table className="grid">
-          <thead><tr><th>Work cell</th><th>XA facilities</th><th className="right">Hours a week</th><th className="right">Load</th><th>Late work</th><th>Set by</th><th /></tr></thead>
+          <thead><tr><th>{word.one[0]?.toUpperCase() + word.one.slice(1)}</th><th>XA facilities</th><th className="right">Hours a week</th><th className="right">Load</th><th>Late work</th><th>Set by</th><th /></tr></thead>
           <tbody>
-            {(data?.workCells ?? []).map((w) => {
+            {(current?.workCells ?? []).map((w) => {
               const codes = w.mapping?.facilities ?? null;
-              const cap = codes && codes.length ? workCellCapacity(read, codes) : null;
+              const cap = codes && codes.length ? workCellCapacity(read, codes, dept) : null;
               return (
                 <tr key={w.name}>
-                  <td><b>{w.name}</b></td>
+                  <td><b>{w.name}</b>{w.detail && <div className="sub">{w.detail}</div>}</td>
                   <td>{codes === null ? <span className="chip soon">not tied yet</span> : codes.length === 0 ? <span className="muted">not a scheduled facility</span>
                     : codes.map((c) => <span key={c} className="mono" title={names.get(c) ?? 'not in the scheduler\'s file'} style={{ marginRight: 8, color: names.size && !names.has(c) ? 'var(--late)' : undefined }}>{c}</span>)}</td>
                   <td className="right">{cap ? qty(cap.hoursPerWeek) : ''}</td>
@@ -107,10 +121,10 @@ export function WorkCells() {
         </table>
       </div>
       {editing && read && (
-        <Picker cell={editing} read={read} current={data?.workCells.find((w) => w.name === editing)?.mapping?.facilities ?? null} onClose={() => setEditing(null)} onSave={async (facilities) => {
+        <Picker cell={editing} department={dept} read={read} current={current?.workCells.find((w) => w.name === editing)?.mapping?.facilities ?? null} onClose={() => setEditing(null)} onSave={async (facilities) => {
           setSaveError(null);
           try {
-            await put('/metals/facilities', { workCell: editing, facilities });
+            await put(`/facilities/${dept}`, { workCell: editing, facilities });
             app.toast(facilities === null ? `${editing} cleared.` : facilities.length ? `${editing} is ${facilities.join(', ')}.` : `${editing} is not a scheduled facility.`);
             setEditing(null);
             reload();

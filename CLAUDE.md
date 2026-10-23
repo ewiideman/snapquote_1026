@@ -9,9 +9,12 @@ Read README.md first. This file is the rules and where things stand.
   Metals calculator, Procurement vendor quotes, manual prices for every department, business
   development's own prices with a reason, review and send, the customer's PDF, won/lost/no bid,
   revisions, accounts and Metals rates under Settings.
-- **Linking SnapQuote to the Production Scheduler is set aside** (Eric Wiideman, Oct 10, 2026): do
-  not build on the exchange below, do not propose it as a next step, and leave `MACK_EXCHANGE_DIR`
-  unset on Mack's server. The code stays as it is.
+- **Linking SnapQuote to the Production Scheduler: SnapQuote's side only** (Eric Wiideman, Oct 22,
+  2026, lifting the Oct 10 hold for SnapQuote's side): SnapQuote's half may be built; the scheduler's
+  repository stays separate, and `MACK_EXCHANGE_DIR` stays unset on Mack's server until he says.
+  Oct 22: hours from every calculator (`calculatorHours` in `src/quoting/exchange.ts`: Molding press
+  hours without setup, Machining machine hours, Assembly labor hours), and each department ties its
+  work cells, presses or machines on the Work cells page (`/facilities/:department`).
 - State (2026-10-05, scheduler link): **SnapQuote's side of a file exchange with the Production
   Scheduler is built; the scheduler's side is not** (Eric Wiideman, Oct 5: file drop, quotes into the
   scheduler first, Chris Glaski ties work cells to XA facilities; then "keep the production scheduler

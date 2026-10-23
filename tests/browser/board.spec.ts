@@ -16,7 +16,8 @@ test.beforeAll(async () => {
   for (const name of ['Kestrel Labs', 'Orion Devices', 'Halcyon Imaging', 'Brightline Energy', 'Northeast Precision Surgical Instrument Holdings International']) {
     cust[name] = (await db.query<{ id: number }>('INSERT INTO quote.customer (name) VALUES ($1) RETURNING id', [name]))[0]!.id;
   }
-  const day = (d: number) => new Date(Date.now() + d * 86_400_000).toISOString().slice(0, 10);
+  // A calendar date in local time, as the board counts days: an evening run in UTC would be a day off.
+  const day = (d: number) => { const t = new Date(Date.now() + d * 86_400_000); return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`; };
   const hoursAgo = (h: number) => new Date(Date.now() - h * 3_600_000).toISOString();
   let n = 0;
   const quote = async (o: { owner?: string; customer?: string; title?: string; status?: string; due?: number; lines?: number; itar?: boolean; sent?: number; closed?: number; award?: number; requests?: [string, string, number?][] }) => {

@@ -314,6 +314,25 @@ test('Molding (ADC) prices a molded part with its calculator: one price at every
   assert.equal(est.oneTimeLabel, 'Mold (domestic)');
   assert.equal(est.detail.calculator, 'molding');
   assert.equal((await adc('POST', `/quotes/${qid}/requests/molding/answer`, {})).status, 200);
+
+  // Its press hours reach the plant check and the scheduler's file; ADC ties the press to its XA facility.
+  const press = res.press.id as string;
+  assert.equal((await jon('PUT', '/facilities/molding', { workCell: press, facilities: ['3/CAV30'] })).status, 403);
+  assert.equal((await adc('PUT', '/facilities/metals', { workCell: 'Laser', facilities: [] })).status, 403, 'ADC ties only its own presses');
+  assert.equal((await adc('PUT', '/facilities/molding', { workCell: 'No such press', facilities: [] })).status, 404);
+  assert.equal((await adc('PUT', '/facilities/molding', { workCell: press, facilities: ['3/CAV30'] })).status, 200);
+  const presses = (await adc('GET', '/facilities/molding')).body.workCells;
+  assert.equal(presses.length, 53);
+  assert.deepEqual(presses.find((w: any) => w.name === press).mapping.facilities, ['3/CAV30']);
+  const plant = (await jon('GET', `/quotes/${qid}/capacity`)).body;
+  const row = plant.rows.find((r: any) => r.department === 'molding');
+  assert.deepEqual([row.workCell, row.facilities, row.setupIncluded], [press, ['3/CAV30'], false]);
+  const perHour = res.process.partsPerHour as number;
+  assert.deepEqual(row.hours, [Math.round((2000 / perHour) * 100) / 100, Math.round((10000 / perHour) * 100) / 100]);
+  await writeQuotesFile(db, exchangeDir);
+  const file = JSON.parse(readFileSync(join(exchangeDir, 'snapquote', 'quotes.json'), 'utf8'));
+  const work = file.quotes.find((q: any) => q.work.some((w: any) => w.department === 'molding')).work.find((w: any) => w.department === 'molding');
+  assert.deepEqual([work.workCell, work.facilities, work.pieces, work.setupIncluded], [press, ['3/CAV30'], [2000, 10000], false]);
 });
 
 test('Machining and Assembly price with their calculators: the workbook example, and labor by the second', async () => {
@@ -358,6 +377,15 @@ test('Machining and Assembly price with their calculators: the workbook example,
   assert.deepEqual([est.oneTimeCost, est.oneTimeLabel], [1750, 'Equipment and tooling']);
   const tiny = await asm('POST', `/lines/${top.id}/assembly`, { input: { sections: [{ name: 'Top', partsPerAssembly: 1, steps: [{ assemblySec: 10 }], equipment: [] }] } });
   assert.match(tiny.body.problems.join(' '), /rounds to 0.00 hours/);
+
+  // Machine hours and assembly labor hours reach the plant check: A20 is 2 h setup + 70 s a piece; the
+  // assembly is 216 one-minute steps, 3.6 h an assembly.
+  const plant = (await jon('GET', `/quotes/${qid}/capacity`)).body;
+  const byDept = (d: string) => plant.rows.filter((r: any) => r.department === d).map((r: any) => [r.workCell, r.hours, r.setupIncluded]);
+  assert.deepEqual(byDept('machining'), [['A20', [2.19, 3.94], true]]);
+  assert.deepEqual(byDept('assembly'), [['Assembly', [36, 360], true]]);
+  assert.equal((await asm('PUT', '/facilities/assembly', { workCell: 'Assembly', facilities: ['9/ASSY'] })).status, 200);
+  assert.deepEqual((await asm('GET', '/facilities/assembly')).body.workCells.map((w: any) => [w.name, w.mapping?.facilities]), [['Assembly', ['9/ASSY']]]);
 });
 
 test('business development deletes a quote: off the board and the queues, requests withdrawn and restored, a won quote kept', async () => {

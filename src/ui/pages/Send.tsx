@@ -108,22 +108,23 @@ function OverrideDialog({ line, cell, onClose, onDone }: { line: Line; cell: She
 interface QuoteCapacity {
   read: CapacityRead;
   quantities: number[];
-  rows: { workCell: string; partNumber: string | null; ownQuantities: number[] | null; facilities: string[] | null; hours: number[]; capacity: WorkCellCapacity | null }[];
+  rows: { department: string; workCell: string; partNumber: string | null; ownQuantities: number[] | null; facilities: string[] | null; hours: number[]; setupIncluded: boolean; capacity: WorkCellCapacity | null }[];
   withoutHours: { department: string; partNumber: string; reason: string }[];
 }
 
-/** Can the plant make it: this quote's Metals hours against the Production Scheduler's load on the same machines. */
+/** Can the plant make it: this quote's hours, department by department, against the Production Scheduler's load on the same machines. */
 function PlantCapacity({ id, version }: { id: number; version: string }) {
+  const app = useApp();
   const { data } = useAsync(() => get<QuoteCapacity>(`/quotes/${id}/capacity`), [id, version]);
   if (!data || (data.rows.length === 0 && data.withoutHours.length === 0)) return null;
   const read = data.read;
   const file = read.connected ? read.file : null;
-  const metals = file?.departments.find((x) => x.key === 'metals');
+  const scheduled = file ? file.departments.filter((x) => data.rows.some((r) => r.department === x.key)) : [];
   return (
     <div className="section" style={{ marginBottom: 16 }}>
       <header>
         <h2>Can the plant make it?</h2>
-        <span className="muted small">{metals ? `Metals load from the Production Scheduler (${metals.scheduleName}), written ${ago(file?.writtenAt ?? '')}` : ''}</span>
+        <span className="muted small">{scheduled.length ? `Load from the Production Scheduler (${scheduled.map((x) => x.scheduleName).join('; ')}), written ${ago(file?.writtenAt ?? '')}` : ''}</span>
       </header>
       {!read.connected && <div className="body"><div className="banner info">This server is not linked to the Production Scheduler, so only the hours are shown.</div></div>}
       {read.connected && !file && <div className="body"><div className="banner warn">{read.problem}</div></div>}
@@ -141,8 +142,8 @@ function PlantCapacity({ id, version }: { id: number; version: string }) {
               const c = r.capacity;
               const biggest = r.hours[r.hours.length - 1] ?? 0;
               return (
-                <tr key={`${r.workCell}|${r.partNumber ?? ''}`}>
-                  <td><b>{r.workCell}</b>
+                <tr key={`${r.department}|${r.workCell}|${r.partNumber ?? ''}`}>
+                  <td><b>{r.workCell}</b> <span className="muted small">{app.deptName(r.department)}{r.setupIncluded ? '' : ', run hours only'}</span>
                     <div className="sub">{r.facilities === null ? 'not tied to an XA facility yet' : r.facilities.length === 0 ? 'not a scheduled facility' : r.facilities.join(', ')}{r.partNumber ? ` · ${r.partNumber} at its own quantities (${(r.ownQuantities ?? []).map(qty).join(', ')})` : ''}</div>
                   </td>
                   {r.ownQuantities ? <td colSpan={data.quantities.length} className="right">{r.hours.map((h) => qty(h)).join(' / ')}</td> : data.quantities.map((q, i) => <td key={q} className="right">{qty(r.hours[i] ?? 0)}</td>)}
@@ -157,7 +158,7 @@ function PlantCapacity({ id, version }: { id: number; version: string }) {
         </table>
       )}
       <div className="body muted small stack" style={{ gap: 4 }}>
-        <span>Hours are standard hours from the Metals calculator: each operation's setup once, plus run time per piece. The scheduler's hours are clock hours, so a quote's hours are divided by the work cell's efficiency (0.85 in Metals) before they are set against them. Load is late work plus the next six weeks, against six weeks of the schedule's hours. The quote is not in the schedule; it is shown beside it.</span>
+        <span>Hours are standard hours from each department's calculator: Metals and Machining, each setup once plus run time per piece; Molding (ADC), press time only, since its setup is priced in dollars, not hours; Assembly, the steps' time per assembly. The scheduler's hours are clock hours, so a quote's hours are divided by the work cell's efficiency before they are set against them. Load is late work plus the next six weeks, against six weeks of the schedule's hours. The quote is not in the schedule; it is shown beside it.</span>
         {data.withoutHours.length > 0 && <span>No hours for {data.withoutHours.map((w) => `${w.partNumber} (${w.reason})`).join(', ')}.</span>}
         {data.rows.some((r) => r.facilities === null) && <span>A work cell not tied to its XA facility yet can be tied under Work cells.</span>}
       </div>

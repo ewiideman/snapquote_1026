@@ -1,6 +1,9 @@
 # The exchange with the Production Scheduler
 
-**Status (Oct 5, 2026): SnapQuote's side is built; the scheduler's is not.** Eric Wiideman: keep the
+**Status (Oct 22, 2026): SnapQuote's side is built, with hours from every calculator; the scheduler's is
+not.** Oct 10 the link was set aside; Oct 22 Eric Wiideman lifted that for SnapQuote's side only (the
+scheduler stays separate, `MACK_EXCHANGE_DIR` stays unset on Mack's server until he says).
+Oct 5: Eric Wiideman: keep the
 Production Scheduler separate for now. SnapQuote writes `snapquote/quotes.json` and reads
 `scheduler/capacity.json` if one appears; until the scheduler writes it, SnapQuote shows hours without
 the plant's load. This file is the agreed format for when the scheduler side is built.
@@ -61,19 +64,31 @@ and no-bid quotes are left out.
     "quantities": [100, 500], "orderedQuantity": 500, "leadTimeWeeks": 6,
     "work": [
       { "department": "metals", "partNumber": "100-200", "workCell": "Trumpf V85 CNC Press Brake",
-        "facilities": ["7/V85"], "pieces": [300, 1500], "hours": [3.25, 12.75], "ownQuantities": false }
+        "facilities": ["7/V85"], "pieces": [300, 1500], "hours": [3.25, 12.75], "ownQuantities": false, "setupIncluded": true },
+      { "department": "molding", "partNumber": "HSG-1", "workCell": "Cav-30 [2300 (268)]",
+        "facilities": null, "pieces": [200, 1000], "hours": [5.26, 26.32], "ownQuantities": false, "setupIncluded": false }
     ],
-    "withoutHours": [{ "department": "molding", "partNumber": "200-7", "reason": "no calculator in SnapQuote for this department yet" }]
+    "withoutHours": [{ "department": "machining", "partNumber": "200-7", "reason": "priced by hand, not with the calculator" }]
   }]
 }
 ```
 
 - `quantities` are assembly breaks. `hours[i]` is at `quantities[i]` (`pieces[i]` pieces of the
   part), unless `ownQuantities`, when the part was quoted at its own quantities (`pieces`).
-- Hours are standard hours from SnapQuote's Metals calculator: each operation's setup once, plus run
-  minutes × pieces ÷ 60. Efficiency is not applied.
-- `facilities`: the XA facilities Chris Glaski tied the work cell to in SnapQuote; `[]` he said it is
-  not a scheduled facility; `null` not tied yet.
+- Hours are standard hours from the calculator that priced the part (`calculatorHours` in
+  `src/quoting/exchange.ts`). Efficiency is not applied.
+  - **Metals**: each operation's setup once a lot, plus run minutes × pieces ÷ 60, per rate-sheet work cell.
+  - **Molding (ADC)**: pieces ÷ parts an hour on the press the price was worked out on (scrap is already
+    in parts an hour). ADC's model prices setup in dollars, not hours, so `setupIncluded` is false.
+  - **Machining**: each machine's setup once a lot, plus cycle seconds × pieces ÷ 3600; both operations
+    on one machine add up.
+  - **Assembly**: the steps' assembly, test and QA seconds an assembly × pieces ÷ 3600, not rounded to
+    hundredths as the price is; one work cell, `Assembly`.
+  Procurement's parts are bought and never listed. A part priced by hand or from a vendor quote is in
+  `withoutHours` with the reason.
+- `workCell`: a Metals rate-sheet work cell, a Molding press, a Machining machine, or `Assembly`.
+- `facilities`: the XA facilities the department tied the work cell to on SnapQuote's Work cells page
+  (Chris Glaski for Metals); `[]` not a scheduled facility; `null` not tied yet.
 - `orderedQuantity`: the break the customer ordered, when business development recorded it on winning.
 
 ## How the scheduler would show it (not built)
@@ -89,5 +104,6 @@ Work cells not tied yet, facilities outside the department, and parts without ho
 1. Make a folder both services can write, for example `D:\MackExchange`.
 2. Set `MACK_EXCHANGE_DIR=D:\MackExchange` in SnapQuote's `.env` and restart it (and in the
    scheduler's, once its side is built).
-3. In SnapQuote, Chris Glaski ties each Metals work cell to its XA facilities (Work cells page). Until
-   the scheduler writes `capacity.json`, he types the facility codes.
+3. In SnapQuote, each department ties its work cells, presses or machines to XA facilities (Work cells
+   page: Chris Glaski for Metals, ADC for presses, Machining for machines, Assembly for its one).
+   Until the scheduler writes `capacity.json`, they type the facility codes.

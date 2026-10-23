@@ -24,7 +24,7 @@ import { metalsRoutes } from './metalsRoutes.ts';
 import { moldingRoutes } from './moldingRoutes.ts';
 import { machiningAssemblyRoutes } from './machiningAssemblyRoutes.ts';
 import type { ExchangeTimer } from './exchangeTimer.ts';
-import { facilityMap, quoteCapacity, readCapacity, setFacilities } from '../persistence/exchange.ts';
+import { isHoursDepartment, quoteCapacity, readCapacity, setFacilities, workCells } from '../persistence/exchange.ts';
 import { referenceRows as metalsReference } from '../persistence/reference.ts';
 
 const UI_ROOT = join(PROJECT_ROOT, 'dist', 'ui');
@@ -295,19 +295,22 @@ export function createApp(db: Database, options: AppOptions): express.Express {
   api.get('/quotes/:id/capacity', async (req, res) => {
     res.json(await quoteCapacity(db, id(req), exchangeDir));
   });
-  // Metals work cells and the XA facilities Chris Glaski ties them to.
-  api.get('/metals/facilities', async (_req, res) => {
-    const order = (r: { data: unknown }) => (r.data as { sortOrder?: number }).sortOrder ?? 0;
-    const cells = (await metalsReference(db, 'metals', 'work_cell')).filter((r) => r.active).sort((a, b) => order(a) - order(b));
-    const map = await facilityMap(db);
-    res.json({ capacity: readCapacity(exchangeDir), workCells: cells.map((c) => ({ name: c.key, mapping: map.get(c.key) ?? null })) });
-  });
-  api.put('/metals/facilities', async (req, res) => {
+  // Each department's work cells (Metals work cells, Molding presses, Machining machines, Assembly) and
+  // the XA facilities it ties them to. /metals/facilities is the Metals calculator's older name for it.
+  const facilitiesOf = async (department: string) => {
+    if (!isHoursDepartment(department)) throw new HttpError(404, 'That department has no work cells.');
+    return { department, capacity: readCapacity(exchangeDir), workCells: await workCells(db, department) };
+  };
+  const saveFacilities = async (req: Request, res: Response, department: string) => {
     const b = body(req);
     if (typeof b['workCell'] !== 'string') throw new HttpError(400, 'workCell is required');
-    await setFacilities(db, me(res), b['workCell'], b['facilities'] === undefined ? null : b['facilities']);
+    await setFacilities(db, me(res), department, b['workCell'], b['facilities'] === undefined ? null : b['facilities']);
     res.json({ ok: true });
-  });
+  };
+  api.get('/facilities/:department', async (req, res) => { res.json(await facilitiesOf(String(req.params['department']))); });
+  api.put('/facilities/:department', async (req, res) => { await saveFacilities(req, res, String(req.params['department'])); });
+  api.get('/metals/facilities', async (_req, res) => { res.json(await facilitiesOf('metals')); });
+  api.put('/metals/facilities', async (req, res) => { await saveFacilities(req, res, 'metals'); });
 
   // ---- files
   api.post('/quotes/:id/files', express.raw({ type: 'application/octet-stream', limit: MAX_FILE_BYTES }), async (req, res) => {

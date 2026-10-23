@@ -5,12 +5,14 @@ export type CapacityRead = { connected: false } | { connected: true; file: Capac
 export interface WorkCellCapacity { facilities: FacilityCapacity[]; efficiency: number; unknown: string[]; hoursPerWeek: number; lateHours: number; nextSixWeeksHours: number; load: number | null; caughtUpWeek: number | null }
 export interface Mapping { workCell: string; facilities: string[]; setByName: string; setAt: string }
 
-export function metalsFacilities(read: CapacityRead | undefined | null): FacilityCapacity[] {
-  return read && read.connected && read.file ? read.file.departments.filter((d) => d.key === 'metals').flatMap((d) => d.facilities) : [];
+/** A department's facilities in the scheduler's file. */
+export function facilitiesOf(read: CapacityRead | undefined | null, department: string): FacilityCapacity[] {
+  return read && read.connected && read.file ? read.file.departments.filter((d) => d.key === department).flatMap((d) => d.facilities) : [];
 }
+export const metalsFacilities = (read: CapacityRead | undefined | null): FacilityCapacity[] => facilitiesOf(read, 'metals');
 
-export function workCellCapacity(read: CapacityRead | undefined | null, codes: readonly string[]): WorkCellCapacity | null {
-  const all = metalsFacilities(read);
+export function workCellCapacity(read: CapacityRead | undefined | null, codes: readonly string[], department = 'metals'): WorkCellCapacity | null {
+  const all = facilitiesOf(read, department);
   if (!all.length || !codes.length) return null;
   const facilities = codes.map((c) => all.find((f) => f.code === c)).filter((f): f is FacilityCapacity => !!f);
   const sum = (k: 'hoursPerWeek' | 'lateHours' | 'nextSixWeeksHours') => Math.round(facilities.reduce((s, f) => s + f[k], 0) * 100) / 100;
