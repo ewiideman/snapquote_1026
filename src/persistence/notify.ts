@@ -6,7 +6,8 @@ import { departmentName } from '../quoting/departments.ts';
 export type NotificationKind =
   | 'request.new' | 'request.reopened' | 'question.asked' | 'question.answered'
   | 'prices.back' | 'quote.ready' | 'price.changed' | 'quote.deleted'
-  | 'request.assigned' | 'request.withdrawn' | 'quote.restored' | 'quote.owner' | 'quote.won';
+  | 'request.assigned' | 'request.withdrawn' | 'quote.restored' | 'quote.owner' | 'quote.won'
+  | 'reminder.prices_due' | 'reminder.question_waiting' | 'reminder.customer_due';
 
 interface QuoteFacts { id: number; number: string; revision: number; customer: string | null; title: string; ownerId: string; ownerName: string; customerDueOn: string | null }
 
@@ -66,18 +67,30 @@ export function compose(kind: NotificationKind, q: QuoteFacts, x: { department?:
       return { subject: `${q.number} is yours now: ${label(q)}`, body: `${x.actorName} handed ${label(q)} to you. You will get its emails from now on.${q.customerDueOn ? ` ${q.customer ?? 'The customer'} wants it by ${day(q.customerDueOn)}.` : ''}` };
     case 'quote.won':
       return { subject: `Won: ${label(q)}`, body: `${q.customer ?? 'The customer'} ordered on ${q.number}, which ${dept} priced.${x.text ? ` ${x.text}` : ''}` };
+    case 'reminder.prices_due':
+      return { subject: `Reminder: ${dept}'s prices on ${q.number} are due ${day(x.neededBy ?? null)}`, body: `${q.ownerName} needs ${dept}'s prices for ${label(q)} by ${day(x.neededBy ?? null)}. Some parts are still to price.` };
+    case 'reminder.question_waiting':
+      return { subject: `Reminder: ${dept} is waiting on your answer on ${q.number}`, body: `${dept}'s prices for ${label(q)} are due ${day(x.neededBy ?? null)}, and ${dept} is waiting on your answer to its question.` };
+    case 'reminder.customer_due':
+      return { subject: `Reminder: ${q.number} is due to ${q.customer ?? 'the customer'} ${day(q.customerDueOn)}`, body: `${q.customer ?? 'The customer'} wants ${label(q)} by ${day(q.customerDueOn)}, and it has not been sent yet.` };
     case 'price.changed':
       return { subject: `${dept} changed a price on ${q.number}`, body: `${x.actorName} changed a ${dept} price on ${label(q)} after answering. Check the review page before sending.` };
   }
 }
 
-/** Queues one email per person, never to the person who did it. */
-export async function notify(db: Queryable, to: readonly string[], actorId: string, q: QuoteFacts, kind: NotificationKind, x: Parameters<typeof compose>[2]): Promise<void> {
+/**
+ * Queues one email per person, never to the person who did it. With `about`, an email of this kind
+ * about the same thing is queued only once per person (reminders). Returns how many were queued.
+ */
+export async function notify(db: Queryable, to: readonly string[], actorId: string | null, q: QuoteFacts, kind: NotificationKind, x: Parameters<typeof compose>[2], about: string | null = null): Promise<number> {
   const { subject, body } = compose(kind, q, x);
+  let queued = 0;
   for (const user of new Set(to)) {
     if (user === actorId) continue;
-    await db.query('INSERT INTO app.notification (to_user, quote_id, kind, subject, body) VALUES ($1, $2, $3, $4, $5)', [user, q.id, kind, subject, body]);
+    const rows = await db.query('INSERT INTO app.notification (to_user, quote_id, kind, subject, body, about) VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT DO NOTHING RETURNING id', [user, q.id, kind, subject, body, about]);
+    queued += rows.length;
   }
+  return queued;
 }
 
 export interface Mailer { send(to: string, subject: string, text: string): Promise<void> }

@@ -15,6 +15,7 @@ import { createApp } from '../../src/server/app.ts';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { writeQuotesFile } from '../../src/persistence/exchange.ts';
 import { sendQueued } from '../../src/persistence/notify.ts';
+import { queueReminders } from '../../src/persistence/reminders.ts';
 
 let db: Database;
 let server: Server;
@@ -484,6 +485,52 @@ test('emails follow the work: the assigned estimator, a new owner, a department 
   assert.equal((await jon('POST', `/quotes/${c}/restore`, {})).status, 200);
   assert.deepEqual(await to(c, 'quote.restored'), ['adc.est']);
   assert.ok((await mails(c)).every((m) => m.to_user !== 'jon.whitney'), 'never the person who did it');
+});
+
+test('reminders the working day before: a department\'s prices, a question waiting, the customer\'s date; each once', async () => {
+  const jon = await session('jon.whitney');
+  const mk = async (department: string, neededBy: string, customerDueOn: string) => {
+    const qid = (await jon('POST', '/quotes', {})).body.id as number;
+    await jon('PATCH', `/quotes/${qid}`, { customerName: 'Zimmer', quantities: [5], customerDueOn });
+    await jon('PUT', `/quotes/${qid}/lines`, { lines: [{ partNumber: `R-${department}`, revision: '', description: 'Part', qtyPer: 1, notes: '', department }] });
+    assert.equal((await jon('POST', `/quotes/${qid}/send-to-estimating`, { neededBy })).status, 200);
+    // Sent days ago, as a quote due tomorrow would have been.
+    await db.query("UPDATE quote.request SET sent_at = '2026-10-19T12:00:00' WHERE quote_id = $1", [qid]);
+    await db.query("UPDATE quote.quote SET created_at = '2026-10-19T12:00:00' WHERE id = $1", [qid]);
+    return qid;
+  };
+  const due = await mk('machining', '2026-10-23', '2026-10-28');
+  const asked = await mk('assembly', '2026-10-23', '2026-10-23');
+  const later = await mk('molding', '2026-10-27', '2026-10-30');
+  const asm = await session('asm.est');
+  assert.equal((await asm('POST', `/quotes/${asked}/messages`, { body: 'Which torque?', department: 'assembly', question: true })).status, 200);
+  const reminders = async (qid: number) => db.query<{ to_user: string; kind: string; subject: string }>("SELECT to_user, kind, subject FROM app.notification WHERE quote_id = $1 AND kind LIKE 'reminder.%' ORDER BY id", [qid]);
+
+  // Thursday Oct 22 before 7 am: nothing yet. At 9 am: what is due Friday.
+  assert.equal(await queueReminders(db, new Date(2026, 9, 22, 6, 30)), 0);
+  assert.ok(await queueReminders(db, new Date(2026, 9, 22, 9, 0)) >= 3);
+  assert.deepEqual((await reminders(due)).map((r) => [r.to_user, r.kind]), [['mach.est', 'reminder.prices_due']]);
+  assert.match((await reminders(due))[0]?.subject ?? '', /Machining's prices on Q\d\d-\d{4} are due Fri, Oct 23/);
+  assert.deepEqual((await reminders(asked)).map((r) => [r.to_user, r.kind]), [['jon.whitney', 'reminder.question_waiting'], ['jon.whitney', 'reminder.customer_due']],
+    'Assembly waits on Jon, so Jon is reminded, and of the customer\'s date');
+  assert.deepEqual(await reminders(later), []);
+  // Again the same day: nothing new.
+  assert.equal(await queueReminders(db, new Date(2026, 9, 22, 15, 0)), 0);
+
+  // Friday Oct 23: Tuesday's date is not yet reminded of; Monday's would be. Monday Oct 26: Tuesday's is.
+  assert.deepEqual(await reminders(later), []);
+  await queueReminders(db, new Date(2026, 9, 26, 8, 0));
+  assert.deepEqual((await reminders(later)).map((r) => [r.to_user, r.kind]), [['adc.est', 'reminder.prices_due']]);
+
+  // A department that has answered, or a quote already sent, is not reminded.
+  const done = await mk('machining', '2026-10-29', '2026-10-29');
+  const line = (await jon('GET', `/quotes/${done}`)).body.lines[0];
+  const machining = await session('mach.est');
+  assert.equal((await machining('PUT', `/lines/${line.id}/estimate`, { basis: 'manual', prices: [{ quantity: 5, unitPrice: 9 }] })).status, 200);
+  assert.equal((await machining('POST', `/quotes/${done}/requests/machining/answer`, {})).status, 200);
+  assert.equal((await jon('POST', `/quotes/${done}/sent`, {})).status, 200);
+  await queueReminders(db, new Date(2026, 9, 28, 8, 0));
+  assert.deepEqual(await reminders(done), []);
 });
 
 test('signed out, nothing but the session is reachable', async () => {

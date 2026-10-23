@@ -37,7 +37,11 @@ Read README.md first. This file is the rules and where things stand.
   `email_notifications` off, set by each person on their account page). Oct 22: every action checked
   against who must hear of it; added: the estimator a department's part is assigned to (and from then
   on only they hear of it, `requestPeople`), a new owner, a department taken off or a quote closed while
-  it still prices, a win (to the departments that priced it), a restored quote. Quote page shows whether
+  it still prices, a win (to the departments that priced it), a restored quote. Reminders (Eric, Oct 22:
+  "day before due"; migration 0007, `src/quoting/reminders.ts`, `src/persistence/reminders.ts`,
+  `src/server/reminderTimer.ts`): the working day before (a Monday date on the Friday), from 7 am, once
+  each: a department still pricing by its needed-by date, business development when that department
+  waits on its answer, and the owner of an unsent quote by the customer's date. Quote page shows whether
   changes are saved; revise/reopen and temporary passwords use dialogs, not browser prompts.
 - State (2026-10-06, directory): **customers and suppliers come over from the old SnapQuote by CSV**
   (`docs/import-from-old-snapquote.md`): read-only `psql \copy` on the server, then

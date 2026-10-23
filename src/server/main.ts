@@ -6,6 +6,7 @@ import { openDatabase, runCli } from '../cli/common.ts';
 import { administratorCanSignIn } from '../persistence/accounts.ts';
 import { startExchange } from './exchangeTimer.ts';
 import { makeMailer, startMail } from './mailTimer.ts';
+import { startReminders } from './reminderTimer.ts';
 
 await runCli(async () => {
   const config = loadConfig();
@@ -15,6 +16,8 @@ await runCli(async () => {
   const exchange = config.exchangeDir ? startExchange(db, config.exchangeDir) : undefined;
   // Quote emails through Mack's mail relay (SMTP_HOST); without it they wait, queued.
   const mail = config.mail ? startMail(db, makeMailer(config.mail), config.appUrl) : undefined;
+  // Reminders the working day before a department's prices or the customer's quote are due.
+  const reminders = startReminders(db);
   const server = createApp(db, { sessionHours: config.sessionHours, storageDir: config.storageDir, exchangeDir: config.exchangeDir, ...(exchange ? { exchange } : {}) }).listen(config.port, config.host, (err?: Error) => {
     if (err) {
       console.error(`Could not listen on http://${config.host}:${config.port}: ${err.message}`);
@@ -34,6 +37,7 @@ await runCli(async () => {
   const stop = async () => {
     exchange?.stop();
     mail?.stop();
+    reminders.stop();
     server.close();
     await db.close();
     process.exit(0);
