@@ -34,7 +34,10 @@ Read README.md first. This file is the rules and where things stand.
   `app.notification` outbox written in the same transaction as the step; `src/persistence/notify.ts`
   composes and `sendQueued` sends; `src/server/mailTimer.ts` every 30 s through Mack's relay,
   `SMTP_HOST`/`APP_URL`; never to the actor; skipped without an address or with
-  `email_notifications` off, set by each person on their account page). Quote page shows whether
+  `email_notifications` off, set by each person on their account page). Oct 22: every action checked
+  against who must hear of it; added: the estimator a department's part is assigned to (and from then
+  on only they hear of it, `requestPeople`), a new owner, a department taken off or a quote closed while
+  it still prices, a win (to the departments that priced it), a restored quote. Quote page shows whether
   changes are saved; revise/reopen and temporary passwords use dialogs, not browser prompts.
 - State (2026-10-06, directory): **customers and suppliers come over from the old SnapQuote by CSV**
   (`docs/import-from-old-snapquote.md`): read-only `psql \copy` on the server, then

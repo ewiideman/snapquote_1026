@@ -5,7 +5,8 @@ import { departmentName } from '../quoting/departments.ts';
 
 export type NotificationKind =
   | 'request.new' | 'request.reopened' | 'question.asked' | 'question.answered'
-  | 'prices.back' | 'quote.ready' | 'price.changed' | 'quote.deleted';
+  | 'prices.back' | 'quote.ready' | 'price.changed' | 'quote.deleted'
+  | 'request.assigned' | 'request.withdrawn' | 'quote.restored' | 'quote.owner' | 'quote.won';
 
 interface QuoteFacts { id: number; number: string; revision: number; customer: string | null; title: string; ownerId: string; ownerName: string; customerDueOn: string | null }
 
@@ -20,6 +21,18 @@ export async function quoteFacts(db: Queryable, quoteId: number): Promise<QuoteF
 /** The estimators of a department who can sign in. */
 export async function estimatorsOf(db: Queryable, department: string): Promise<string[]> {
   return (await db.query<{ id: string }>("SELECT id FROM app.user_account WHERE role = 'estimator' AND department = $1 AND disabled_at IS NULL AND password_hash IS NOT NULL", [department])).map((r) => r.id);
+}
+
+/**
+ * Who hears about a department's part of a quote: the person it is assigned to, when there is one who
+ * can sign in; otherwise every estimator of the department.
+ */
+export async function requestPeople(db: Queryable, quoteId: number, department: string): Promise<string[]> {
+  const r = (await db.query<{ assignee_id: string | null; can: boolean }>(
+    `SELECT r.assignee_id, (u.id IS NOT NULL AND u.disabled_at IS NULL AND u.password_hash IS NOT NULL) AS can
+       FROM quote.request r LEFT JOIN app.user_account u ON u.id = r.assignee_id
+      WHERE r.quote_id = $1 AND r.department = $2 ORDER BY r.id DESC LIMIT 1`, [quoteId, department]))[0];
+  return r?.assignee_id && r.can ? [r.assignee_id] : estimatorsOf(db, department);
 }
 
 const label = (q: QuoteFacts) => `${q.number}${q.revision ? ` rev ${q.revision}` : ''} ${q.customer ?? 'No customer'}${q.title ? ` — ${q.title}` : ''}`;
@@ -43,6 +56,16 @@ export function compose(kind: NotificationKind, q: QuoteFacts, x: { department?:
       return { subject: `Ready to send: ${label(q)}`, body: `Every department has priced ${q.number}${dept ? ` (${dept} was last)` : ''}. Review the prices and send the customer their copy.${q.customerDueOn ? ` ${q.customer ?? 'The customer'} wants it by ${day(q.customerDueOn)}.` : ''}` };
     case 'quote.deleted':
       return { subject: `${q.number} withdrawn: no prices needed from ${dept}`, body: `${x.actorName} deleted ${label(q)}${x.text ? `: ${x.text}` : ''}. It is off ${dept}'s queue; nothing more is needed.` };
+    case 'request.assigned':
+      return { subject: `${q.number} is yours to price for ${dept}`, body: `${x.actorName} gave you ${dept}'s part of ${label(q)}.${x.neededBy ? ` Prices are needed by ${day(x.neededBy)}.` : ''}` };
+    case 'request.withdrawn':
+      return { subject: `${q.number}: no prices needed from ${dept}`, body: `${x.actorName} ${x.text ?? 'withdrew the request'} on ${label(q)}. It is off ${dept}'s queue; nothing more is needed.` };
+    case 'quote.restored':
+      return { subject: `${q.number} is back: ${dept}'s prices are needed again`, body: `${x.actorName} restored ${label(q)}, which had been deleted. It is back in ${dept}'s queue.` };
+    case 'quote.owner':
+      return { subject: `${q.number} is yours now: ${label(q)}`, body: `${x.actorName} handed ${label(q)} to you. You will get its emails from now on.${q.customerDueOn ? ` ${q.customer ?? 'The customer'} wants it by ${day(q.customerDueOn)}.` : ''}` };
+    case 'quote.won':
+      return { subject: `Won: ${label(q)}`, body: `${q.customer ?? 'The customer'} ordered on ${q.number}, which ${dept} priced.${x.text ? ` ${x.text}` : ''}` };
     case 'price.changed':
       return { subject: `${dept} changed a price on ${q.number}`, body: `${x.actorName} changed a ${dept} price on ${label(q)} after answering. Check the review page before sending.` };
   }

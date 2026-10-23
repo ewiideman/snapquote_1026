@@ -4,7 +4,7 @@
 import type { Database, Queryable } from '../server/db.ts';
 import type { Account } from './accounts.ts';
 import { audit, HttpError } from './util.ts';
-import { estimatorsOf, notify, quoteFacts } from './notify.ts';
+import { estimatorsOf, notify, quoteFacts, requestPeople } from './notify.ts';
 import { DEPARTMENTS, departmentName, isDepartment, type DepartmentKey } from '../quoting/departments.ts';
 import { emailDomainOf } from '../quoting/email-domain.ts';
 import {
@@ -402,6 +402,7 @@ export async function updateHeader(db: Database, actor: Account, id: number, pat
     if (patch.notes !== undefined) set('notes', optText(patch.notes, 10000) ?? '');
     if (!sets.length) return;
     await tx.query(`UPDATE quote.quote SET ${sets.join(', ')}, updated_at = now() WHERE id = $1`, params);
+    if (patch.ownerId !== undefined && patch.ownerId !== q.ownerId) await notify(tx, [String(patch.ownerId)], actor.id, await quoteFacts(tx, id), 'quote.owner', { actorName: actor.displayName });
     await audit(tx, actor.id, 'quote.updated', 'quote', id, { fields: Object.keys(patch) });
   });
 }
@@ -428,7 +429,7 @@ async function reopenFor(db: Queryable, actor: Account, quoteId: number, departm
     const rows = await db.query("UPDATE quote.request SET status = 'open', answered_at = NULL, answered_by = NULL WHERE quote_id = $1 AND department = $2 AND status = 'answered' RETURNING id", [quoteId, d]);
     if (rows.length) {
       await event(db, quoteId, actor.id, `${why} ${departmentName(d)} has it back to check its prices.`, d);
-      await notify(db, await estimatorsOf(db, d), actor.id, await quoteFacts(db, quoteId), 'request.reopened', { department: d, actorName: actor.displayName });
+      await notify(db, await requestPeople(db, quoteId, d), actor.id, await quoteFacts(db, quoteId), 'request.reopened', { department: d, actorName: actor.displayName });
     }
   }
 }
@@ -436,9 +437,13 @@ async function reopenFor(db: Queryable, actor: Account, quoteId: number, departm
 /** Makes sure every department with lines has a live request, and withdraws those with none. */
 async function syncRequests(db: Queryable, actor: Account, quoteId: number, neededBy: string | null): Promise<void> {
   const depts = new Set((await lineRows(db, quoteId)).map((l) => l.department).filter((d): d is DepartmentKey => !!d));
-  const live = await db.query<{ id: number; department: DepartmentKey }>("SELECT id, department FROM quote.request WHERE quote_id = $1 AND status <> 'withdrawn'", [quoteId]);
+  const live = await db.query<{ id: number; department: DepartmentKey; status: RequestStatus }>("SELECT id, department, status FROM quote.request WHERE quote_id = $1 AND status <> 'withdrawn'", [quoteId]);
   for (const r of live) {
     if (!depts.has(r.department)) {
+      // A department still pricing is told to stop; one that had answered has nothing left to do.
+      if (r.status === 'open' || r.status === 'question') {
+        await notify(db, await requestPeople(db, quoteId, r.department), actor.id, await quoteFacts(db, quoteId), 'request.withdrawn', { department: r.department, actorName: actor.displayName, text: `took ${departmentName(r.department)}'s last part off` });
+      }
       await db.query("UPDATE quote.request SET status = 'withdrawn' WHERE id = $1", [r.id]);
       await event(db, quoteId, actor.id, `${departmentName(r.department)} no longer has any parts on this quote.`, r.department);
     }
@@ -599,9 +604,16 @@ export async function assignRequest(db: Database, actor: Account, quoteId: numbe
   requireEstimator(actor, department);
   const assignee = assigneeId === null || assigneeId === '' ? null : String(assigneeId);
   if (assignee && !(await db.query('SELECT 1 FROM app.user_account WHERE id = $1 AND disabled_at IS NULL', [assignee])).length) throw new HttpError(400, 'No such person.');
-  const rows = await db.query("UPDATE quote.request SET assignee_id = $3 WHERE quote_id = $1 AND department = $2 AND status <> 'withdrawn' RETURNING id", [quoteId, department, assignee]);
-  if (!rows.length) throw new HttpError(404, 'No such request.');
-  await audit(db, actor.id, 'request.assigned', 'quote', quoteId, { department, assignee });
+  await db.transaction(async (tx) => {
+    const before = (await tx.query<{ assignee_id: string | null }>("SELECT assignee_id FROM quote.request WHERE quote_id = $1 AND department = $2 AND status <> 'withdrawn' FOR UPDATE", [quoteId, department]))[0];
+    const rows = await tx.query<{ needed_by: string | null; status: RequestStatus }>("UPDATE quote.request SET assignee_id = $3 WHERE quote_id = $1 AND department = $2 AND status <> 'withdrawn' RETURNING needed_by, status", [quoteId, department, assignee]);
+    if (!rows[0]) throw new HttpError(404, 'No such request.');
+    // The person given the work hears of it, unless they took it themselves or already had it.
+    if (assignee && assignee !== before?.assignee_id && rows[0].status !== 'answered') {
+      await notify(tx, [assignee], actor.id, await quoteFacts(tx, quoteId), 'request.assigned', { department, actorName: actor.displayName, neededBy: rows[0].needed_by });
+    }
+    await audit(tx, actor.id, 'request.assigned', 'quote', quoteId, { department, assignee });
+  });
 }
 
 /** A note on the quote. From a department, `question` puts its request on hold until business development answers. */
@@ -627,7 +639,7 @@ export async function postMessage(db: Database, actor: Account, quoteId: number,
       if (answered.length) {
         kind = 'answer';
         const facts = await quoteFacts(tx, quoteId);
-        for (const a of answered) await notify(tx, await estimatorsOf(tx, a.department), actor.id, facts, 'question.answered', { department: a.department, actorName: actor.displayName, text: body });
+        for (const a of answered) await notify(tx, await requestPeople(tx, quoteId, a.department), actor.id, facts, 'question.answered', { department: a.department, actorName: actor.displayName, text: body });
       }
     }
     await tx.query('INSERT INTO quote.message (quote_id, department, author_id, kind, body) VALUES ($1, $2, $3, $4, $5)', [quoteId, department, actor.id, kind, body]);
@@ -729,8 +741,21 @@ export async function closeQuote(db: Database, actor: Account, quoteId: number, 
     if (ordered !== null && !q.quantities.includes(ordered)) throw new HttpError(400, 'The quantity ordered is one of the quantities quoted.');
     await tx.query('UPDATE quote.quote SET status = $2, closed_at = now(), close_reason = $3, po_number = $4, award_amount = $5, ordered_quantity = $6, updated_at = now() WHERE id = $1',
       [quoteId, outcome, reason, outcome === 'won' ? optText(input.poNumber, 100) : null, outcome === 'won' ? award : null, ordered]);
-    if (q.status === 'estimating') await tx.query("UPDATE quote.request SET status = 'withdrawn' WHERE quote_id = $1 AND status IN ('open', 'question')", [quoteId]);
     const words = outcome === 'won' ? 'Won' : outcome === 'lost' ? 'Lost' : 'No bid';
+    const facts = await quoteFacts(tx, quoteId);
+    if (q.status === 'estimating') {
+      // Departments still pricing are told to stop.
+      const open = await tx.query<{ department: DepartmentKey }>("UPDATE quote.request SET status = 'withdrawn' WHERE quote_id = $1 AND status IN ('open', 'question') RETURNING department", [quoteId]);
+      for (const r of open) {
+        await notify(tx, await requestPeople(tx, quoteId, r.department), actor.id, facts, 'request.withdrawn', { department: r.department, actorName: actor.displayName, text: `closed the quote (${words.toLowerCase()}${reason ? `: ${reason}` : ''})` });
+      }
+    }
+    if (outcome === 'won') {
+      // The departments that priced it hear it was ordered.
+      const priced = await tx.query<{ department: DepartmentKey }>("SELECT DISTINCT department FROM quote.request WHERE quote_id = $1 AND status = 'answered' ORDER BY department", [quoteId]);
+      const po = optText(input.poNumber, 100);
+      for (const r of priced) await notify(tx, await requestPeople(tx, quoteId, r.department), actor.id, facts, 'quote.won', { department: r.department, actorName: actor.displayName, text: po ? `PO ${po}.` : undefined });
+    }
     await event(tx, quoteId, actor.id, `${words}${reason ? `: ${reason}` : ''}${outcome === 'won' && input.poNumber ? ` (PO ${String(input.poNumber).trim()})` : ''}.`);
     await audit(tx, actor.id, 'quote.closed', 'quote', quoteId, { outcome, reason });
   });
@@ -751,7 +776,7 @@ export async function deleteQuote(db: Database, actor: Account, quoteId: number,
     await tx.query('UPDATE quote.quote SET deleted_at = now(), deleted_by = $2, delete_reason = $3, deleted_requests = $4::jsonb, updated_at = now() WHERE id = $1',
       [quoteId, actor.id, reason, JSON.stringify(open.map((r) => ({ id: r.id, status: r.status })))]);
     const facts = await quoteFacts(tx, quoteId);
-    for (const r of open) await notify(tx, await estimatorsOf(tx, r.department), actor.id, facts, 'quote.deleted', { department: r.department, actorName: actor.displayName, text: reason ?? undefined });
+    for (const r of open) await notify(tx, await requestPeople(tx, quoteId, r.department), actor.id, facts, 'quote.deleted', { department: r.department, actorName: actor.displayName, text: reason ?? undefined });
     await event(tx, quoteId, actor.id, `Deleted${reason ? `: ${reason}` : ''}.`);
     await audit(tx, actor.id, 'quote.deleted', 'quote', quoteId, { reason, status: q.status, withdrew: open });
   });
@@ -765,8 +790,15 @@ export async function restoreQuote(db: Database, actor: Account, quoteId: number
       'SELECT deleted_at, deleted_requests FROM quote.quote WHERE id = $1 FOR UPDATE', [quoteId]))[0];
     if (!q) throw new HttpError(404, 'No such quote.');
     if (!q.deleted_at) throw new HttpError(409, 'This quote is not deleted.');
-    for (const r of q.deleted_requests ?? []) await tx.query("UPDATE quote.request SET status = $2 WHERE id = $1 AND status = 'withdrawn'", [r.id, r.status]);
+    const back: DepartmentKey[] = [];
+    for (const r of q.deleted_requests ?? []) {
+      const rows = await tx.query<{ department: DepartmentKey }>("UPDATE quote.request SET status = $2 WHERE id = $1 AND status = 'withdrawn' RETURNING department", [r.id, r.status]);
+      if (rows[0]) back.push(rows[0].department);
+    }
     await tx.query('UPDATE quote.quote SET deleted_at = NULL, deleted_by = NULL, delete_reason = NULL, deleted_requests = NULL, updated_at = now() WHERE id = $1', [quoteId]);
+    // The departments told it was withdrawn are told it is back.
+    const facts = await quoteFacts(tx, quoteId);
+    for (const d of new Set(back)) await notify(tx, await requestPeople(tx, quoteId, d), actor.id, facts, 'quote.restored', { department: d, actorName: actor.displayName });
     await event(tx, quoteId, actor.id, 'Restored.');
     await audit(tx, actor.id, 'quote.restored', 'quote', quoteId, { requests: q.deleted_requests ?? [] });
   });

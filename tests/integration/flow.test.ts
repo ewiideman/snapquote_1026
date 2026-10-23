@@ -422,6 +422,70 @@ test('business development deletes a quote: off the board and the queues, reques
   if (won) assert.equal((await jon('POST', `/quotes/${won.id}/delete`, {})).status, 409);
 });
 
+test('emails follow the work: the assigned estimator, a new owner, a department taken off, closed, won, restored', async () => {
+  await createAccount(db, null, { id: 'metals.two', displayName: 'Second Metals Estimator', role: 'estimator', department: 'metals', password: 'correct horse', temporary: false });
+  await createAccount(db, null, { id: 'kim.sales', displayName: 'Kim Sales', role: 'sales', password: 'correct horse', temporary: false });
+  const jon = await session('jon.whitney');
+  const metals = await session('metals.est');
+  const mails = async (qid: number) => db.query<{ to_user: string; kind: string; subject: string; body: string }>('SELECT to_user, kind, subject, body FROM app.notification WHERE quote_id = $1 ORDER BY id', [qid]);
+  const to = async (qid: number, kind: string) => (await mails(qid)).filter((m) => m.kind === kind).map((m) => m.to_user).sort();
+  const newQuote = async (lines: { partNumber: string; department: string }[]) => {
+    const qid = (await jon('POST', '/quotes', {})).body.id as number;
+    await jon('PATCH', `/quotes/${qid}`, { customerName: 'Stryker', quantities: [10] });
+    await jon('PUT', `/quotes/${qid}/lines`, { lines: lines.map((l) => ({ ...l, revision: '', description: 'Part', qtyPer: 1, notes: '' })) });
+    assert.equal((await jon('POST', `/quotes/${qid}/send-to-estimating`, {})).status, 200);
+    return qid;
+  };
+
+  // Both Metals estimators hear of a new quote; once it is given to one, only that one hears of it.
+  const a = await newQuote([{ partNumber: 'BRK-1', department: 'metals' }, { partNumber: 'HSG-1', department: 'molding' }]);
+  assert.deepEqual(await to(a, 'request.new'), ['adc.est', 'metals.est', 'metals.two']);
+  assert.equal((await metals('POST', `/quotes/${a}/requests/metals/assign`, { assigneeId: 'metals.est' })).status, 200);
+  assert.deepEqual(await to(a, 'request.assigned'), [], 'taking it yourself sends nothing');
+  assert.equal((await metals('POST', `/quotes/${a}/requests/metals/assign`, { assigneeId: 'metals.two' })).status, 200);
+  assert.deepEqual(await to(a, 'request.assigned'), ['metals.two']);
+  assert.match((await mails(a)).find((m) => m.kind === 'request.assigned')?.subject ?? '', /is yours to price for Metals/);
+  const lines = (await jon('GET', `/quotes/${a}`)).body.lines;
+  const m = await session('metals.two');
+  assert.equal((await m('POST', `/quotes/${a}/messages`, { body: 'Which finish?', department: 'metals', question: true })).status, 200);
+  assert.equal((await jon('POST', `/quotes/${a}/messages`, { body: 'Clear zinc.' })).status, 200);
+  assert.deepEqual(await to(a, 'question.answered'), ['metals.two'], 'the answer goes to the person it is assigned to');
+
+  // Handing the quote to someone else in business development tells them.
+  assert.equal((await jon('PATCH', `/quotes/${a}`, { ownerId: 'kim.sales' })).status, 200);
+  assert.deepEqual(await to(a, 'quote.owner'), ['kim.sales']);
+  assert.equal((await jon('PATCH', `/quotes/${a}`, { ownerId: 'jon.whitney' })).status, 200);
+  assert.deepEqual(await to(a, 'quote.owner'), ['kim.sales'], 'taking it back yourself sends nothing');
+
+  // Taking Molding's last part off tells ADC to stop.
+  const metalsLine = lines.find((l: any) => l.department === 'metals');
+  assert.equal((await jon('PUT', `/quotes/${a}/lines`, { lines: [{ id: metalsLine.id, partNumber: 'BRK-1', revision: '', description: 'Part', qtyPer: 1, notes: '', department: 'metals' }] })).status, 200);
+  assert.deepEqual(await to(a, 'request.withdrawn'), ['adc.est']);
+  assert.match((await mails(a)).find((m) => m.kind === 'request.withdrawn')?.body ?? '', /took Molding \(ADC\)'s last part off/);
+
+  // Closing while a department still prices it tells that department.
+  assert.equal((await jon('POST', `/quotes/${a}/close`, { outcome: 'no_bid', reason: 'Out of scope' })).status, 200);
+  assert.deepEqual(await to(a, 'request.withdrawn'), ['adc.est', 'metals.two']);
+  assert.match((await mails(a)).filter((m) => m.kind === 'request.withdrawn').at(-1)?.body ?? '', /closed the quote \(no bid: Out of scope\)/);
+
+  // A win tells the departments that priced it.
+  const b = await newQuote([{ partNumber: 'BRK-2', department: 'metals' }]);
+  const line = (await jon('GET', `/quotes/${b}`)).body.lines[0];
+  assert.equal((await metals('PUT', `/lines/${line.id}/estimate`, { basis: 'manual', prices: [{ quantity: 10, unitPrice: 5 }] })).status, 200);
+  assert.equal((await metals('POST', `/quotes/${b}/requests/metals/answer`, {})).status, 200);
+  assert.equal((await jon('POST', `/quotes/${b}/sent`, {})).status, 200);
+  assert.equal((await jon('POST', `/quotes/${b}/close`, { outcome: 'won', poNumber: 'PO-9' })).status, 200);
+  assert.deepEqual(await to(b, 'quote.won'), ['metals.est', 'metals.two']);
+  assert.match((await mails(b)).find((m) => m.kind === 'quote.won')?.body ?? '', /PO PO-9/);
+
+  // Restoring a deleted quote tells the departments it was taken from.
+  const c = await newQuote([{ partNumber: 'HSG-3', department: 'molding' }]);
+  assert.equal((await jon('POST', `/quotes/${c}/delete`, {})).status, 200);
+  assert.equal((await jon('POST', `/quotes/${c}/restore`, {})).status, 200);
+  assert.deepEqual(await to(c, 'quote.restored'), ['adc.est']);
+  assert.ok((await mails(c)).every((m) => m.to_user !== 'jon.whitney'), 'never the person who did it');
+});
+
 test('signed out, nothing but the session is reachable', async () => {
   assert.equal((await fetch(`${base}/board`)).status, 401);
   assert.equal((await fetch(`${base}/files/1`)).status, 401);
