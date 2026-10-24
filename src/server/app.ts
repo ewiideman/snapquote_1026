@@ -51,6 +51,9 @@ const WHILE_TEMPORARY = new Set([...PUBLIC, 'POST /session/password', 'POST /ses
 const LOCK_AFTER = 5;
 const LOCK_WINDOW_MS = 15 * 60_000;
 
+/** The terms printed on the customer's copy: long enough for a full terms and conditions of sale. */
+export const TERMS_MAX = 15_000;
+
 export function createApp(db: Database, options: AppOptions): express.Express {
   const sessionHours = options.sessionHours ?? 168;
   const storageDir = options.storageDir;
@@ -344,7 +347,7 @@ export function createApp(db: Database, options: AppOptions): express.Express {
   api.put('/settings/terms', async (req, res) => {
     const a = requireAdministrator(res);
     const text = body(req)['text'];
-    if (typeof text !== 'string' || text.length > 5000) throw new HttpError(400, 'Terms are text, at most 5,000 characters.');
+    if (typeof text !== 'string' || text.length > TERMS_MAX) throw new HttpError(400, `Terms are text, at most ${TERMS_MAX.toLocaleString('en-US')} characters.`);
     await setReference(db, a, { department: 'quote', kind: 'setting', key: 'terms', data: { text } });
     res.json({ text });
   });

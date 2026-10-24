@@ -6,6 +6,9 @@ import type { Role } from '../lib/types.ts';
 import { Dialog, ErrorBanner, NumberInput, ROLE_NAMES, useApp } from '../components/ui.tsx';
 import { ago } from '../lib/format.ts';
 
+/** As the server allows (TERMS_MAX in src/server/app.ts). */
+const TERMS_MAX = 15_000;
+
 
 interface Listing { id: string; displayName: string; role: Role; department: string | null; email: string | null; canSignIn: boolean; disabledAt: string | null; lastSignedInAt: string | null }
 
@@ -88,9 +91,10 @@ function Terms() {
   useEffect(() => { if (data) setText(data.text); }, [data]);
   return (
     <div className="section">
-      <header><h2>Terms on the customer's copy</h2><span className="muted small">Printed at the end of every quote PDF. Leave empty to print none.</span></header>
+      <header><h2>Terms on the customer's copy</h2><span className="muted small">Printed on their own page at the end of every quote PDF. Leave empty to print none.</span></header>
       <div className="body stack">
-        <textarea rows={5} value={text} onChange={(e) => setText(e.target.value)} placeholder="e.g. Prices valid for 30 days. FOB Arlington, VT. Payment terms net 30." />
+        <textarea rows={14} maxLength={TERMS_MAX} value={text} onChange={(e) => setText(e.target.value)} placeholder="e.g. Prices valid for 30 days. FOB Arlington, VT. Payment terms net 30." />
+        <div className="hint" aria-live="polite">{text.length.toLocaleString('en-US')} of {TERMS_MAX.toLocaleString('en-US')} characters. They print on their own page, under “Terms & Conditions”, at the end of the customer's copy.</div>
         <ErrorBanner error={error} />
         <div><button className="btn primary" disabled={!data || text === data.text} onClick={async () => { try { await put('/settings/terms', { text }); app.toast('Terms saved.'); } catch (err) { setError(err); } }}>Save terms</button></div>
       </div>

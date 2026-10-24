@@ -406,18 +406,18 @@ input.num { text-align: right; }
 .drop.strip:hover { border-color: var(--accent); background: var(--surface); }
 .drop.strip.over { border-style: solid; border-color: var(--accent); background: var(--accent-soft); }
 .drop.strip.failed { border-style: solid; border-color: var(--late-line); }
-.strip-error { display: flex; align-items: flex-start; gap: 8px; padding: 10px 14px 12px 62px; border-top: 1px solid var(--late-line); color: var(--late); font-size: var(--text-sm); }
+.strip-error { display: flex; align-items: flex-start; gap: 8px; padding: 10px 14px 12px 92px; border-top: 1px solid var(--late-line); color: var(--late); font-size: var(--text-sm); }
 .strip-error svg { width: 16px; height: 16px; margin-top: 2px; }
 .drop.strip .strip-error span { color: inherit; font-size: inherit; }
-.strip-row { display: flex; align-items: center; gap: var(--space-3); padding: 10px 12px 10px 14px; }
-.drop.strip .icon { width: 36px; height: 36px; border-radius: var(--r); }
-.drop.strip .icon svg { width: 18px; height: 18px; }
+.strip-row { display: flex; align-items: center; gap: var(--space-4); min-height: 112px; padding: 20px 20px 20px 24px; }
+.drop.strip .icon { width: 52px; height: 52px; border-radius: var(--r-lg); }
+.drop.strip .icon svg { width: 24px; height: 24px; }
 .strip-text { flex: 1; min-width: 0; }
-.drop.strip .strip-text strong { font-size: var(--text); }
+.drop.strip .strip-text strong { font-size: var(--text-lg); }
 .drop.strip .strip-text span { display: block; color: var(--muted); font-size: var(--text-sm); }
 .strip-actions { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; justify-content: flex-end; }
 .drop.strip .strip-actions span { color: inherit; font-size: inherit; }
-.strip-help { padding: 10px 16px 14px 62px; border-top: 1px solid var(--line); color: var(--ink-2); font-size: var(--text-sm); }
+.strip-help { padding: 10px 16px 14px 92px; border-top: 1px solid var(--line); color: var(--ink-2); font-size: var(--text-sm); }
 .strip-help ul { margin: 0 0 6px; padding-left: 18px; }
 .strip-help > * { max-width: 780px; }
 .strip-help li + li { margin-top: 4px; }

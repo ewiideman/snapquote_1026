@@ -129,8 +129,14 @@ export function quotePdf(d: QuoteDetail, opts: PdfOptions): Promise<Buffer> {
     doc.font('Helvetica').fontSize(10).fillColor(ink).text(`Lead time: ${qty(d.sheet.leadTimeWeeks)} weeks after receipt of order.`, left, y, { width });
     y = doc.y + 6;
   }
+  // The terms on a page of their own, under their heading; long terms run on to further pages.
   if (opts.terms.trim()) {
-    doc.font('Helvetica').fontSize(8.5).fillColor(muted).text(opts.terms.trim(), left, y + 6, { width });
+    doc.addPage();
+    doc.font('Helvetica-Bold').fontSize(16).fillColor(ink).text('Terms & Conditions', left, doc.page.margins.top, { width });
+    doc.font('Helvetica').fontSize(9).fillColor(muted).text(`Quotation ${d.quote.number}${d.quote.revision ? ` rev ${d.quote.revision}` : ''}  ·  ${day(opts.today)}`, left, doc.y + 2, { width });
+    const top = doc.y + 8;
+    doc.moveTo(left, top).lineTo(left + width, top).strokeColor(rule).lineWidth(1).stroke();
+    doc.font('Helvetica').fontSize(8.5).fillColor(ink).text(opts.terms.trim(), left, top + 12, { width, lineGap: 1.5 });
   }
   doc.end();
   return done;

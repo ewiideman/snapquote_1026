@@ -120,3 +120,15 @@ test("markups: an administrator changes one figure, the rest of the department's
   const mach = (await admin('GET', '/markups')).body.find((g: any) => g.department === 'machining');
   assert.equal(mach.fields.find((f: any) => f.key === 'rawMaterialMarkup').pct, 30);
 });
+
+test('the terms on the customer\'s copy hold up to 15,000 characters, and only an administrator sets them', async () => {
+  const admin = await session('admin');
+  const jon = await session('jon');
+  const long = 'Terms. '.repeat(3000).slice(0, 15_000);
+  assert.equal((await admin('PUT', '/settings/terms', { text: long })).status, 200);
+  assert.equal((await admin('GET', '/settings/terms')).body.text.length, 15_000);
+  const over = await admin('PUT', '/settings/terms', { text: `${long}x` });
+  assert.equal(over.status, 400);
+  assert.match(over.body.error, /at most 15,000 characters/);
+  assert.equal((await jon('PUT', '/settings/terms', { text: 'x' })).status, 403);
+});
