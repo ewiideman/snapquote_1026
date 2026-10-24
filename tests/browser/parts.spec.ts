@@ -93,3 +93,26 @@ test('a newer parts list dropped on the quote is reviewed, then the parts are br
   await jon.locator('.file', { hasText: 'bom-rev-b.csv' }).getByRole('button', { name: 'Compare' }).click();
   await expect(jon.getByRole('dialog')).toContainText('the same parts as the quote');
 });
+
+test("the pricing panel lists the quote's drawings, the part's own first", async ({ browser }) => {
+  const jon = await signIn(browser, 'jon');
+  const qid = (await (await jon.request.post('/api/quotes', { data: {} })).json()).id;
+  await jon.request.patch(`/api/quotes/${qid}`, { data: { customerName: 'Northfield Robotics', quantities: [50] } });
+  await jon.request.put(`/api/quotes/${qid}/lines`, { data: { lines: [{ partNumber: 'NR-1210', revision: 'A', description: 'Housing, wrist', qtyPer: 1, notes: '', department: 'machining' }] } });
+  const pdf = (text: string) => Buffer.from(`%PDF-1.4\n% ${text}\n`);
+  for (const name of ['Assembly overview.pdf', 'NR-1210_RevA.pdf', 'parts.csv']) {
+    const body = name.endsWith('.csv') ? Buffer.from('Part Number,Qty\nNR-1210,1\n') : pdf(name);
+    expect((await jon.request.post(`/api/quotes/${qid}/files?name=${encodeURIComponent(name)}`, { data: body, headers: { 'content-type': 'application/octet-stream' } })).status()).toBe(201);
+  }
+  expect((await jon.request.post(`/api/quotes/${qid}/send-to-estimating`, { data: {} })).status()).toBe(200);
+
+  const mach = await signIn(browser, 'mach');
+  await mach.goto(`/#/quotes/${qid}`);
+  await mach.getByRole('button', { name: 'Price it' }).click();
+  const drawings = mach.locator('.panel').getByRole('group', { name: 'Drawings' });
+  await expect(drawings.locator('a')).toHaveText([/NR-1210_RevA\.pdfthis part/, /Assembly overview\.pdf/]);
+  const own = drawings.locator('a.own');
+  await expect(own).toHaveAttribute('target', '_blank');
+  const res = await mach.request.get((await own.getAttribute('href')) as string);
+  expect(res.headers()['content-type']).toContain('application/pdf');
+});

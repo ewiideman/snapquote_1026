@@ -4,7 +4,8 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { del, get, post, put } from '../lib/api.ts';
 import { useAsync } from '../lib/useAsync.ts';
 import type { Line, QuoteDetail } from '../lib/types.ts';
-import { canEstimate, ErrorBanner, NumberInput, Panel, SuggestInput, useApp } from '../components/ui.tsx';
+import { canEstimate, ErrorBanner, Icon, NumberInput, Panel, SuggestInput, useApp } from '../components/ui.tsx';
+import { drawingsFor } from '../lib/drawings.ts';
 import { ago, qty, usd } from '../lib/format.ts';
 import { MoldingCalculator } from './MoldingCalculator.tsx';
 import { MachiningBreakdown, MachiningCalculator } from './MachiningCalculator.tsx';
@@ -12,6 +13,30 @@ import { AssemblyBreakdown, AssemblyCalculator } from './AssemblyCalculator.tsx'
 import { caughtUpWords, loadTone, pct, workCellCapacity, type CapacityRead, type Mapping } from '../lib/capacity.ts';
 
 type Tab = 'calculator' | 'vendors' | 'manual';
+
+/**
+ * The quote's drawings and models, at the top of the panel, the part's own first: one click opens a
+ * PDF or image in a new tab (the browser's own viewer, beside the calculator), or downloads a CAD file.
+ */
+function PartDrawings({ d, line }: { d: QuoteDetail; line: Line }) {
+  const list = drawingsFor(d.attachments, line);
+  const [all, setAll] = useState(false);
+  if (!list.length) return null;
+  const FEW = 4;
+  const shown = all ? list : list.slice(0, FEW);
+  return (
+    <div className="drawings" role="group" aria-label="Drawings">
+      <span className="drawings-label">Drawings</span>
+      {shown.map(({ file, own, opens }) => (
+        <a key={file.id} className={`drawing${own ? ' own' : ''}`} href={`/api/files/${file.id}`} target="_blank" rel="noreferrer"
+          title={opens ? `Open ${file.fileName} in a new tab` : `Download ${file.fileName} to open it in its own program`}>
+          <Icon name="file" /><span className="name">{file.fileName}</span>{own && <span className="this">this part</span>}
+        </a>
+      ))}
+      {list.length > FEW && <button type="button" className="link small" onClick={() => setAll(!all)}>{all ? 'Fewer' : `${list.length - FEW} more`}</button>}
+    </div>
+  );
+}
 const CALC_NAME: Record<string, string> = { metals: 'Metals', molding: 'Molding', machining: 'Machining', assembly: 'Assembly' };
 
 export function PricePanel({ d, line, onClose, onSaved }: { d: QuoteDetail; line: Line; onClose: () => void; onSaved: () => void }) {
@@ -28,6 +53,7 @@ export function PricePanel({ d, line, onClose, onSaved }: { d: QuoteDetail; line
   const saved = () => { onSaved(); onClose(); app.toast(`Price saved for ${title}.`); };
   return (
     <Panel title={title} sub={sub} onClose={onClose}>
+      <PartDrawings d={d} line={line} />
       {line.estimate && <EstimateSummary line={line} />}
       {mine && (
         <>

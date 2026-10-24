@@ -85,6 +85,10 @@ sign-in pages).
   inside a field at its right (how soon the customer's date is, shown only within two weeks or late).
   In tables, `.bare` fields are 30px and `GrowingText` wraps a long value instead of cutting it off.
   Checked in WebKit as well as Chrome.
+- **Drawings in the pricing panel** (`PartDrawings`, `src/ui/lib/drawings.ts`): the quote's drawings and
+  models at the top of the panel, the part's own first (attached to the part, or its part number in the
+  file name), marked "this part". A PDF or image opens in a new tab, in the browser's own viewer beside
+  the calculator; a CAD file downloads. No viewer inside SnapQuote: the browser's is better.
 - **Parts table** (`table.parts`): set column widths, so part numbers show whole and the description
   takes the rest of the row.
 - **`.seg`**: segmented choice; the chosen one is white with blue text and `aria-pressed`.
