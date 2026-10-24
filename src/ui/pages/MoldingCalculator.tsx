@@ -148,7 +148,7 @@ export function MoldingCalculator({ line, onSaved }: { line: Line; onSaved: () =
               </tbody>
             </table>
             <div className="small muted">
-              Needs about {qty(Math.ceil(r.process.minTonnage))} t (1.1 × {qty(s.cavitation ?? 0)} {s.cavitation === 1 ? 'cavity' : 'cavities'} × {s.moldingPressure ?? 0} tons/in² × {s.footprintIn2 ?? 0} in²) · shot {r.process.shotToBarrelPct}% of barrel · {r.process.pressDaysPerYear} press days a year ({r.process.pressUtilizationPct}%) · {qty(r.process.resinLbPerYear)} lb resin a year · mold about {qty(Math.round(r.tool.weightLb))} lb
+              Needs about {qty(Math.ceil(r.process.minTonnage))} t (1.1 × {qty(s.cavitation ?? 0)} {s.cavitation === 1 ? 'cavity' : 'cavities'} × {s.moldingPressure ?? 0} tons/in² × {s.footprintIn2 ?? 0} in²) · shot {r.process.shotToBarrelPct}% of barrel · {r.process.pressDaysPerYear} press {r.process.pressDaysPerYear === 1 ? 'day' : 'days'} a year ({r.process.pressUtilizationPct}%) · {qty(r.process.resinLbPerYear)} lb resin a year · mold about {qty(Math.round(r.tool.weightLb))} lb
             </div>
             {r.warnings.length > 0 && <div className="banner warn">{r.warnings.map((w: string) => <div key={w}>{w}</div>)}</div>}
           </>

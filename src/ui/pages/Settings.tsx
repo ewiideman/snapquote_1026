@@ -145,7 +145,7 @@ function MetalsRates() {
           </tbody>
         </table>
       </div>
-      <div className="body muted small">Work cells and sheet stock came from the old SnapQuote (rate sheet Rev F and the XA purchase history). Changes apply to prices worked out from now on; saved prices keep what they were worked out with.</div>
+      <div className="body muted small">Work cells and sheet stock came from SnapQuote V2 (rate sheet Rev F and the XA purchase history). Changes apply to prices worked out from now on; saved prices keep what they were worked out with.</div>
     </div>
   );
 }
@@ -197,7 +197,7 @@ function MoldingRates() {
           </tbody>
         </table>
       </div>
-      <div className="body muted small">Resins and presses came from the old SnapQuote (ADC's Tool Development Form, press list of Mar 21, 2025). The hourly press rates and setup costs by tonnage are the form's; see docs/molding-calculator.md. Changes apply to prices worked out from now on.</div>
+      <div className="body muted small">Resins and presses came from SnapQuote V2 (ADC's Tool Development Form, press list of Mar 21, 2025). The hourly press rates and setup costs by tonnage are the form's; see docs/molding-calculator.md. Changes apply to prices worked out from now on.</div>
     </div>
   );
 }
@@ -256,7 +256,7 @@ function MachiningRates() {
           </tbody>
         </table>
       </div>
-      <div className="body muted small">Machines, bar stock and the Machining calculator's rates came from the old SnapQuote ("SNAPQUOTE EXCEL TEMPLATE"); Assembly's $72 an hour from its Assembly screen. See docs/machining-assembly-calculators.md.</div>
+      <div className="body muted small">Machines, bar stock and the Machining calculator's rates came from SnapQuote V2 ("SNAPQUOTE EXCEL TEMPLATE"); Assembly's $72 an hour from its Assembly screen. See docs/machining-assembly-calculators.md.</div>
     </div>
   );
 }
@@ -303,7 +303,7 @@ interface MarkupView {
   fields: { key: string; label: string; hint: string; pct: number; importedPct: number; max: number }[];
 }
 
-/** Each calculator's markups in one place, with Mack's figure from the old SnapQuote beside the one in use. */
+/** Each calculator's markups in one place, with Mack's figure from SnapQuote V2 beside the one in use. */
 function Markups() {
   const app = useApp();
   const { data, reload } = useAsync(() => get<MarkupView[]>('/markups'), []);
@@ -317,7 +317,7 @@ function Markups() {
       <header><h2>Markups</h2><span className="muted small">What each calculator adds. A change applies to prices worked out from now on; saved prices keep theirs.</span></header>
       <ErrorBanner error={error} />
       <table className="grid">
-        <thead><tr><th>Department</th><th>Markup</th><th className="right">In use</th><th className="right">Old SnapQuote</th></tr></thead>
+        <thead><tr><th>Department</th><th>Markup</th><th className="right">In use</th><th className="right">SnapQuote V2</th></tr></thead>
         <tbody>
           {(data ?? []).flatMap((g) => g.fields.map((f, i) => (
             <tr key={`${g.department}-${f.key}`}>

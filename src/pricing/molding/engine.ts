@@ -13,8 +13,10 @@ const BARREL_MIN_FACTOR = 0.04458823;
 const BARREL_MAX_FACTOR = 0.25266666;
 const RESIN_REF_DENSITY = 0.0379; // polystyrene: a barrel's capacity is stated in styrene ounces
 const RESIN_USAGE_MULTIPLIER = 1.15;
-// Clamp pressure is a few tons per square inch for injection molding; above this, a figure is PSI.
+// Clamp pressure is a few tons per square inch for injection molding; above this, a figure is checked.
 const PRESSURE_TONS_PER_IN2_MAX = 10;
+// A pressure in the thousands is psi typed where tons per square inch go.
+const PSI_LIKELY_MIN = 1000;
 
 const round = (n: number, decimals: number): number => { const p = 10 ** decimals; return Math.round(n * p) / p; };
 const n0 = (v: number | null | undefined): number => (v === null || v === undefined || !Number.isFinite(v) ? 0 : v);
@@ -97,11 +99,14 @@ export function priceMolding(input: MoldingInput, settings: MoldingSettings, res
   const stb = shotToBarrelPct(shot, chosen, resin);
   const lo = Math.min(resin.barrelMinPct, resin.barrelMaxPct);
   const hi = Math.max(resin.barrelMinPct, resin.barrelMaxPct);
-  if (minTonnage > chosen.tons) warnings.push(`The part needs about ${Math.ceil(minTonnage)} tons; ${chosen.id} is ${chosen.tons}.`);
+  const n = (v: number) => v.toLocaleString('en-US', { maximumFractionDigits: 2 });
+  if (minTonnage > chosen.tons) warnings.push(`The part needs about ${n(Math.ceil(minTonnage))} tons; ${chosen.id} is ${n(chosen.tons)}.`);
   // Not in the old form: the tonnage formula takes tons per square inch, and the old app accepted PSI
   // too (its own fixture gives 281,600 tons). These say so; neither changes the price.
   const pressure = n0(input.moldingPressure);
-  if (pressure > PRESSURE_TONS_PER_IN2_MAX) warnings.push(`Pressure is in tons per square inch; ${pressure} looks like PSI (${pressure} psi is ${round(pressure / 2000, 2)} tons/in²). Check it: it sets the tonnage and the press.`);
+  // In the thousands it is most likely psi (2,000 to 20,000 psi is 1 to 10 tons/in²); between, it is neither.
+  if (pressure >= PSI_LIKELY_MIN) warnings.push(`Pressure is in tons per square inch; ${n(pressure)} looks like psi (${n(pressure)} psi is ${n(round(pressure / 2000, 2))} tons/in²). Check it: it sets the tonnage and the press.`);
+  else if (pressure > PRESSURE_TONS_PER_IN2_MAX) warnings.push(`Pressure is in tons per square inch, and ${n(pressure)} tons/in² is far more than injection molding takes, usually a few tons per square inch. It is too little to be psi (${n(pressure)} psi is ${n(round(pressure / 2000, 2))} tons/in²). Check it: it sets the tonnage and the press.`);
   const L0 = n0(input.partLengthIn), W0 = n0(input.partWidthIn);
   if (L0 > 0 && W0 > 0 && n0(input.footprintIn2) > L0 * W0) warnings.push(`Projected area (${n0(input.footprintIn2)} in², one cavity) is more than the part's length × width (${round(L0 * W0, 2)} in²). Check it: it sets the tonnage and the press.`);
   if (!inRange(stb, lo, hi)) warnings.push(`The shot is ${stb}% of ${chosen.id}'s barrel; ${resin.name} runs best between ${lo}% and ${hi}%.`);

@@ -64,7 +64,7 @@ it. These look wrong and should be put to ADC:
    projected area, which is tons only with pressure in tons per square inch (usually 2 to 5). The old
    app accepted "PSI or tons/in² per your plant convention", and its own example (4,000) works out to
    281,600 tons. SnapQuote asks for tons/in², shows the tonnage's figures, and warns when the pressure
-   is over 10 (likely PSI) or the projected area is more than length × width. Neither changes the
+   is over 10 (in the thousands, likely psi; between 10 and 1,000, neither, and said so) or the projected area is more than length × width. Neither changes the
    price, but both change the tonnage and which press is taken when none is chosen.
 
 ## Not ported

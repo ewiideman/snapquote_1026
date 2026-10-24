@@ -9,6 +9,13 @@ Read README.md first. This file is the rules and where things stand.
   Metals calculator, Procurement vendor quotes, manual prices for every department, business
   development's own prices with a reason, review and send, the customer's PDF, won/lost/no bid,
   revisions, accounts and Metals rates under Settings.
+- State (2026-10-24, RFQ email): **a dropped RFQ email fills in what it says plainly** (Eric Wiideman,
+  Oct 24: the customer "should be the easiest thing to auto-load"). `src/quoting/rfq-facts.ts`: the
+  customer from a line of its own (signature, letterhead) that starts with the sender's own domain name
+  (never from Gmail and the like, never another company's name), matched to the directory ignoring case,
+  punctuation and Inc/LLC before one is added, and the domain kept on it; the quantities and the
+  customer's date only from lines the customer labeled ("Quantities:", "Quote due:"), never the annual
+  usage. Only empty fields on a draft are filled; what was read is said in the toast and the conversation.
 - **Linking SnapQuote to the Production Scheduler: SnapQuote's side only** (Eric Wiideman, Oct 22,
   2026, lifting the Oct 10 hold for SnapQuote's side): SnapQuote's half may be built; the scheduler's
   repository stays separate, and `MACK_EXCHANGE_DIR` stays unset on Mack's server until he says.
@@ -57,7 +64,11 @@ Read README.md first. This file is the rules and where things stand.
   the summary as filters, one toolbar, and cards that say the next step from the board's own data
   (`nextOf` in `src/ui/pages/Board.tsx`; `sentAt` added to the board card). Blue is for action and
   selection only; status is words plus color. Other screens take the tokens and shell; their own
-  redesign is still to come.
+  redesign is still to come. Oct 24: light, dark and system themes from one set of tokens
+  (`:root[data-theme="dark"]`, set before the first paint by `index.html`, choice in the sidebar and
+  on the account page, kept in the browser by `src/ui/lib/theme.ts`); page, sidebar, lanes and cards
+  each their own surface; amber for what needs someone, green for won; the SQ mark is a vector
+  (`BrandMark`). Every text color is WCAG AA in both themes.
 - State (2026-10-10, parts lists): **a dropped spreadsheet's parts come from the customer's own
   part-number column** (`src/quoting/bom.ts`: every rule in its header comment; every confirmed case in
   `tests/unit/bom.test.ts`). Read: '<Company> P/N' and 'Item #' headings, PLM exports (Number /

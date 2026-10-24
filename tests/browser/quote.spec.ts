@@ -49,7 +49,7 @@ test('from RFQ email to won', async ({ browser }) => {
   await expect(jon.getByText('✓ All changes saved')).toBeVisible();
   // A date typed one key at a time: the half-typed years (0002, 0020, 0202) are never saved.
   const due = jon.locator('label', { hasText: 'Customer wants it by' }).locator('input[type=date]');
-  await due.click();
+  await due.click({ position: { x: 16, y: 17 } }); // on the month, where typing a date starts
   await jon.keyboard.type('10202026');
   await due.blur();
   await expect(due).toHaveValue('2026-10-20');

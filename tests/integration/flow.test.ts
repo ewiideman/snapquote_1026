@@ -533,6 +533,44 @@ test('reminders the working day before: a department\'s prices, a question waiti
   assert.deepEqual(await reminders(done), []);
 });
 
+test('an RFQ email from a new customer fills in the customer from its signature, the quantities and the due date', async () => {
+  const jon = await session('jon.whitney');
+  const email = (from: string, company: string, extra = '') => Buffer.from([
+    `From: Marcus Delgado <${from}>`, 'To: jon.whitney@mack.com', 'Subject: RFQ: CR-500 housing assembly', 'Date: Fri, 23 Oct 2026 11:12:00 -0400',
+    'MIME-Version: 1.0', 'Content-Type: text/plain; charset=utf-8', '',
+    'Hi Jon,', '', `${company.split(',')[0]} is requesting a quote for the housing assembly.`, '',
+    'Quantities (complete assemblies): 100, 300 and 600', 'Estimated annual usage: 2,400 assemblies', 'Quote due: Friday, November 13, 2026', extra, '',
+    'Thanks,', 'Marcus Delgado', 'Supply Chain Manager', company, '42 Foundry Lane, Lowell, MA 01852', from, '',
+  ].join('\r\n'));
+  const drop = async (bytes: Buffer, name = 'rfq.eml') => {
+    const qid = (await jon('POST', '/quotes', {})).body.id as number;
+    const r = await jon('POST', `/quotes/${qid}/files?name=${encodeURIComponent(name)}`, undefined, bytes);
+    assert.equal(r.status, 201, JSON.stringify(r.body));
+    return { qid, r: r.body, q: (await jon('GET', `/quotes/${qid}`)).body };
+  };
+
+  const a = await drop(email('marcus.delgado@cobaltridge-medical.example', 'Cobalt Ridge Medical Systems, LLC'));
+  assert.equal(a.q.quote.customerName, 'Cobalt Ridge Medical Systems, LLC');
+  assert.deepEqual(a.q.quote.quantities, [100, 300, 600], 'the annual usage is not a quantity');
+  assert.equal(a.q.quote.customerDueOn, '2026-11-13');
+  assert.equal(a.r.fromEmail.read.length, 3);
+  assert.match(a.r.fromEmail.read[0], /from the email's signature/);
+  assert.ok(a.q.messages.some((m: any) => m.kind === 'event' && /^Read from the email: the customer, Cobalt Ridge Medical Systems, LLC/.test(m.body)), 'said in the conversation');
+  // The next RFQ from that domain is matched by it, whatever its signature says.
+  const b = await drop(email('buyer@cobaltridge-medical.example', 'Cobalt Ridge Medical'));
+  assert.equal(b.q.quote.customerName, 'Cobalt Ridge Medical Systems, LLC');
+  assert.match(b.r.fromEmail.read[0], /from the sender's email address/);
+  // A customer already in the directory without its suffix is used, not added again.
+  await db.query("INSERT INTO quote.customer (name) VALUES ('Harborview Instruments')");
+  const c = await drop(email('dana@harborview-instruments.example', 'Harborview Instruments, Inc.'));
+  assert.equal(c.q.quote.customerName, 'Harborview Instruments');
+  assert.equal((await db.query("SELECT count(*)::int AS n FROM quote.customer WHERE name ILIKE 'Harborview%'"))[0]?.n, 1);
+  // From Gmail, or signed by another company, the customer is left for business development.
+  const d = await drop(email('marcus.delgado@gmail.com', 'Cobalt Ridge Medical Systems, LLC'));
+  assert.equal(d.q.quote.customerName, null);
+  assert.deepEqual(d.q.quote.quantities, [100, 300, 600]);
+});
+
 test('signed out, nothing but the session is reachable', async () => {
   assert.equal((await fetch(`${base}/board`)).status, 401);
   assert.equal((await fetch(`${base}/files/1`)).status, 401);

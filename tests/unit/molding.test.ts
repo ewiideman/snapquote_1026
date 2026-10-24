@@ -81,9 +81,14 @@ test('the reference lists came over whole: 46 resins and 53 presses', () => {
 
 test('a pressure that looks like PSI, or a projected area larger than the part, is said; the price does not move', () => {
   const psi = priceMolding(input, MOLDING_DEFAULTS, [resin], [press165]);
-  assert.ok(psi.warnings.some((w) => /4000 looks like PSI \(4000 psi is 2 tons\/in²\)/.test(w)));
+  assert.ok(psi.warnings.some((w) => /4,000 looks like psi \(4,000 psi is 2 tons\/in²\)/.test(w)));
+  // Between tons per square inch and psi, it is neither: said so, without guessing psi.
+  const odd = priceMolding({ ...input, moldingPressure: 300 }, MOLDING_DEFAULTS, [resin], [press165]);
+  assert.ok(odd.warnings.some((w) => /300 tons\/in² is far more than injection molding takes.*too little to be psi \(300 psi is 0\.15 tons\/in²\)/.test(w)));
+  assert.ok(!odd.warnings.some((w) => /looks like psi/.test(w)));
+  assert.ok(odd.warnings.some((w) => /^The part needs about \d{1,3}(,\d{3})+ tons;/.test(w)), 'tons with thousands commas');
   const tons = priceMolding({ ...input, moldingPressure: 2 }, MOLDING_DEFAULTS, [resin], [press165]);
-  assert.ok(!tons.warnings.some((w) => /PSI|Projected area/.test(w)), 'a sensible part says neither');
+  assert.ok(!tons.warnings.some((w) => /psi|Projected area/.test(w)), 'a sensible part says neither');
   assert.equal(tons.perPart, psi.perPart);
   const area = priceMolding({ ...input, moldingPressure: 2, footprintIn2: 40 }, MOLDING_DEFAULTS, [resin], [press165]);
   assert.ok(area.warnings.some((w) => /Projected area \(40 in², one cavity\) is more than the part's length × width \(32 in²\)/.test(w)));

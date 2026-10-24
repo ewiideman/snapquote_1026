@@ -12,7 +12,9 @@ import { audit, HttpError, sha256 } from './util.ts';
 import { isEmail, readEmail } from '../lib/email.ts';
 import { isSpreadsheet, readSpreadsheet } from '../lib/spreadsheet.ts';
 import { proposeLines } from '../quoting/bom.ts';
-import { customerForEmail } from './quotes.ts';
+import { customerByName, customerForEmail, emailDomain } from './quotes.ts';
+import { companyFromEmail, dueDateFromEmail, quantitiesFromEmail } from '../quoting/rfq-facts.ts';
+import { looseKey, nameKey } from '../quoting/directory.ts';
 
 export const MAX_FILE_BYTES = 100 * 1024 * 1024;
 
@@ -24,7 +26,11 @@ export interface DropResult {
   /** Spreadsheets that looked like a parts list but gave nothing, and why. */
   notRead: { fileName: string; problem: string }[];
   /** What the RFQ email filled in on the quote. */
-  fromEmail: { subject: string; from: string; date: string | null; customerName: string | null } | null;
+  fromEmail: {
+    subject: string; from: string; date: string | null; customerName: string | null;
+    /** What the email filled in that was empty, in words: "the customer, Cobalt Ridge Medical Systems, LLC, from its signature". */
+    read: string[];
+  } | null;
 }
 
 const MIME: Record<string, string> = {
@@ -90,6 +96,22 @@ async function addLines(db: Queryable, quoteId: number, lines: ReturnType<typeof
   return { ids, skipped };
 }
 
+/**
+ * The customer named in the email's signature (see companyFromEmail): one already in the directory
+ * under that name, written the same way or differing only in punctuation or a suffix such as Inc;
+ * otherwise added. The sender's domain is kept on the customer, so their next RFQ is matched by it.
+ */
+async function customerFromSignature(tx: Queryable, text: string, fromAddress: string | null): Promise<{ id: number; name: string } | null> {
+  const name = companyFromEmail(text, fromAddress);
+  const domain = emailDomain(fromAddress);
+  if (!name || !domain) return null;
+  const all = await tx.query<{ id: number; name: string }>('SELECT id, name FROM quote.customer ORDER BY id');
+  const found = all.find((c) => nameKey(c.name) === nameKey(name)) ?? all.find((c) => looseKey(c.name) === looseKey(name));
+  const id = found?.id ?? await customerByName(tx, name);
+  await tx.query('UPDATE quote.customer SET email_domains = array_append(email_domains, $2) WHERE id = $1 AND NOT ($2 = ANY(email_domains))', [id, domain]);
+  return { id, name: found?.name ?? name.trim().replace(/\s+/g, ' ') };
+}
+
 /** Adds one dropped file to a quote, reading it if it is an RFQ email or a parts spreadsheet. */
 export async function dropFile(db: Database, actor: Account, quoteId: number, file: { fileName: string; contentType?: string; bytes: Buffer }, storageDir: string): Promise<DropResult> {
   if (file.bytes.length === 0) throw new HttpError(400, 'The file is empty.');
@@ -108,8 +130,8 @@ export async function dropFile(db: Database, actor: Account, quoteId: number, fi
     }
   }));
   await db.transaction(async (tx) => {
-    const q = (await tx.query<{ status: string; title: string; contact_email: string | null; customer_id: number | null; rfq_received_on: string | null; deleted_at: string | null }>(
-      'SELECT deleted_at, status, title, contact_email, customer_id, rfq_received_on FROM quote.quote WHERE id = $1 FOR UPDATE', [quoteId]))[0];
+    const q = (await tx.query<{ status: string; title: string; contact_email: string | null; customer_id: number | null; rfq_received_on: string | null; deleted_at: string | null; quantities: number[]; customer_due_on: string | null }>(
+      'SELECT deleted_at, status, title, contact_email, customer_id, rfq_received_on, quantities, customer_due_on FROM quote.quote WHERE id = $1 FOR UPDATE', [quoteId]))[0];
     if (!q) throw new HttpError(404, 'No such quote.');
     if (q.deleted_at) throw new HttpError(409, 'This quote was deleted. Restore it to change it.');
     if (q.status === 'won' || q.status === 'lost' || q.status === 'no_bid') throw new HttpError(409, 'This quote is closed.');
@@ -118,15 +140,29 @@ export async function dropFile(db: Database, actor: Account, quoteId: number, fi
     if (email) {
       for (const a of email.attachments) result.attachments.push({ id: await insertAttachment(tx, actor, quoteId, a, 'email', storageDir), fileName: safeName(a.fileName) });
       const from = email.fromName && email.fromAddress ? `${email.fromName} <${email.fromAddress}>` : email.fromAddress || email.fromName;
-      const customer = q.customer_id ? null : await customerForEmail(tx, email.fromAddress);
+      const read: string[] = [];
+      let customer = q.customer_id ? null : await customerForEmail(tx, email.fromAddress);
+      if (customer) read.push(`the customer, ${customer.name}, from the sender's email address`);
+      else if (!q.customer_id && q.status === 'draft') {
+        const signed = await customerFromSignature(tx, email.text, email.fromAddress);
+        if (signed) { customer = signed; read.push(`the customer, ${signed.name}, from the email's signature`); }
+      }
+      // The quantities and due date, from the lines the customer labeled, when the quote has none yet.
+      const quantities = q.quantities.length === 0 && q.status === 'draft' ? quantitiesFromEmail(email.text) : null;
+      if (quantities) read.push(`the quantities, ${quantities.map((n) => n.toLocaleString('en-US')).join(', ')}`);
+      const dueOn = q.customer_due_on ? null : dueDateFromEmail(email.text);
+      if (dueOn) read.push(`the date the customer wants it, ${new Date(`${dueOn}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })}`);
       await tx.query(
         `UPDATE quote.quote SET source_email = coalesce(source_email, $2::jsonb), title = CASE WHEN title = '' THEN $3 ELSE title END,
                 contact_name = coalesce(contact_name, nullif($4, '')), contact_email = coalesce(contact_email, nullif($5, '')),
-                rfq_received_on = coalesce(rfq_received_on, $6::date), customer_id = coalesce(customer_id, $7), updated_at = now() WHERE id = $1`,
+                rfq_received_on = coalesce(rfq_received_on, $6::date), customer_id = coalesce(customer_id, $7),
+                quantities = CASE WHEN $8::int[] IS NULL THEN quantities ELSE $8::int[] END, customer_due_on = coalesce(customer_due_on, $9::date), updated_at = now() WHERE id = $1`,
         [quoteId, JSON.stringify({ subject: email.subject, from, date: email.date }), email.subject.replace(/^((re|fw|fwd|rfq|request for quot(e|ation))\s*:\s*)+/i, '').slice(0, 300),
-          email.fromName.slice(0, 200), email.fromAddress.slice(0, 200), email.date ? email.date.slice(0, 10) : null, customer?.id ?? null]);
+          email.fromName.slice(0, 200), email.fromAddress.slice(0, 200), email.date ? email.date.slice(0, 10) : null, customer?.id ?? null, quantities, dueOn]);
       if (email.text.trim()) await tx.query("INSERT INTO quote.message (quote_id, author_id, kind, body) VALUES ($1, $2, 'note', $3)", [quoteId, actor.id, `From the RFQ email (${from}):\n\n${email.text.trim().slice(0, 8000)}`]);
-      result.fromEmail = { subject: email.subject, from, date: email.date, customerName: customer?.name ?? null };
+      // Said in the conversation, so anyone can see what was read and check it against the email.
+      if (read.length) await tx.query("INSERT INTO quote.message (quote_id, author_id, kind, body) VALUES ($1, $2, 'event', $3)", [quoteId, actor.id, `Read from the email: ${read.join('; ')}. Check them against the email below.`]);
+      result.fromEmail = { subject: email.subject, from, date: email.date, customerName: customer?.name ?? null, read };
     } else if (isEmail(file.fileName)) {
       result.notRead.push({ fileName: file.fileName, problem: 'The email could not be read; it is attached as it is.' });
     }

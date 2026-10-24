@@ -7,12 +7,12 @@ import type { BoardCard, DepartmentKey, DropResult, Stage } from '../lib/types.t
 import { canSell, DropStrip, Due, ErrorBanner, Icon, useApp, type IconName } from '../components/ui.tsx';
 import { usdShort, ago, daysUntil, fileSize, shortDate } from '../lib/format.ts';
 
-const COLUMNS: { key: string; title: string; stages: Stage[]; empty: string }[] = [
-  { key: 'draft', title: 'Drafting', stages: ['draft'], empty: 'No drafts. Drop an RFQ above, or start a new quote.' },
-  { key: 'estimating', title: 'With departments', stages: ['estimating'], empty: 'Nothing is out with the departments for prices.' },
-  { key: 'ready', title: 'Ready to send', stages: ['ready'], empty: 'Nothing to send yet. A quote lands here once every department has priced it.' },
-  { key: 'sent', title: 'With the customer', stages: ['sent'], empty: 'No quotes are waiting on a customer.' },
-  { key: 'closed', title: 'Closed lately', stages: ['won', 'lost', 'no_bid'], empty: 'Nothing won, lost or declined in the last 45 days.' },
+const COLUMNS: { key: string; title: string; stages: Stage[]; empty: string; icon: IconName }[] = [
+  { key: 'draft', title: 'Drafting', stages: ['draft'], empty: 'No drafts. Drop an RFQ above, or start a new quote.', icon: 'file' },
+  { key: 'estimating', title: 'With departments', stages: ['estimating'], empty: 'Nothing is out with the departments for prices.', icon: 'clock' },
+  { key: 'ready', title: 'Ready to send', stages: ['ready'], empty: 'Nothing to send yet. A quote lands here once every department has priced it.', icon: 'send' },
+  { key: 'sent', title: 'With the customer', stages: ['sent'], empty: 'No quotes are waiting on a customer.', icon: 'mail' },
+  { key: 'closed', title: 'Closed lately', stages: ['won', 'lost', 'no_bid'], empty: 'Nothing won, lost or declined in the last 45 days.', icon: 'done' },
 ];
 
 /** Starts a quote from dropped files and says what was taken from them. */
@@ -22,12 +22,13 @@ export async function startQuote(files: File[], toast: (t: string) => void): Pro
   let repeats = 0;
   let from: string | null = null;
   const unread: string[] = [];
+  const read: string[] = [];
   for (const f of files) {
     try {
       const r = await upload<DropResult>(`/quotes/${id}/files`, f);
       lines += r.linesAdded.reduce((s, l) => s + l.lineIds.length, 0);
       repeats += r.linesAdded.reduce((s, l) => s + l.alreadyOnQuote, 0);
-      if (r.fromEmail) from = r.fromEmail.from;
+      if (r.fromEmail) { from = r.fromEmail.from; read.push(...r.fromEmail.read); }
       unread.push(...r.notRead.map((n) => n.fileName));
     } catch (err) {
       unread.push(`${f.name} (${message(err)})`);
@@ -39,7 +40,7 @@ export async function startQuote(files: File[], toast: (t: string) => void): Pro
     from ? `from ${from}` : '',
     lines ? `and ${lines} part${lines === 1 ? '' : 's'} from the parts list` : '',
   ].filter(Boolean).join(' ');
-  toast(`${said}.${repeats ? ` ${repeats} part${repeats === 1 ? ' was' : 's were'} in more than one file and added once.` : ''}${unread.length ? ` Attached but not read: ${unread.join(', ')}.` : ''}`);
+  toast(`${said}.${read.length ? ` Read from it: ${read.join('; ')}.` : ''}${repeats ? ` ${repeats} part${repeats === 1 ? ' was' : 's were'} in more than one file and added once.` : ''}${unread.length ? ` Attached but not read: ${unread.join(', ')}.` : ''}`);
   return id;
 }
 
@@ -87,7 +88,7 @@ function Card({ c }: { c: BoardCard }) {
     <a className="qcard" href={`#/quotes/${c.id}`}>
       <div className="qcard-head">
         {c.customerName
-          ? <span className="cust">{c.customerName}</span>
+          ? <span className="cust" title={c.customerName}>{c.customerName}</span>
           : <span className="cust missing"><Icon name="alert" />Customer not set</span>}
         {c.itar && <span className="tag-itar" title="ITAR: export-controlled">ITAR</span>}
       </div>
@@ -116,7 +117,7 @@ function Card({ c }: { c: BoardCard }) {
         {open && c.customerDueOn && <div className="foot"><Due date={c.customerDueOn} plain /></div>}
         <div className="foot">
           <span className={`act ${next.tone}`}><Icon name={next.icon} /><span>{next.text}</span></span>
-          {value !== null && <span className="value" title={c.stage === 'won' ? 'Award amount' : `Total at ${c.firstQuantity ?? 'the first quantity'}`}>{usdShort(value)}</span>}
+          {value !== null && <span className={`value${c.stage === 'won' ? ' won' : ''}`} title={c.stage === 'won' ? 'Award amount' : `Total at ${c.firstQuantity ?? 'the first quantity'}`}>{usdShort(value)}</span>}
         </div>
       </div>
     </a>
@@ -214,12 +215,13 @@ export function Board() {
     }
   };
 
-  const metric = (key: string, value: ReactNode, label: string, definition: string, tone?: 'attention' | 'late') => (
-    <button type="button" className={`metric${tone ? ` ${tone}` : ''}${value === 0 || value === '$0' ? ' zero' : ''}`} aria-pressed={focus === key}
+  const metric = (key: string, value: ReactNode, label: string, definition: string, tone?: 'attention' | 'late' | 'won') => (
+    <button type="button" className={`metric${tone ? ` ${tone}` : ''}${!data || value === 0 || value === '$0' ? ' zero' : ''}`} aria-pressed={focus === key}
       title={`${definition}. ${focus === key ? 'Click to show every quote.' : 'Click to show only these.'}`}
       onClick={() => setFocus(focus === key ? null : key)}>
-      <span className="metric-value">{value}</span>
-      <span className="metric-label">{tone && <span className="dot" aria-hidden="true" />}{label}</span>
+      <span className="metric-value">{data ? value : '–'}</span>
+      <span className="metric-label">{(tone === 'attention' || tone === 'late') && <span className="dot" aria-hidden="true" />}{label}</span>
+      <Icon name="filter" className="metric-cue" />
       <span className="sr">: {definition}</span>
     </button>
   );
@@ -239,7 +241,7 @@ export function Board() {
       </header>
 
       {seller && (
-        <DropStrip onFiles={stage} busy={busy}
+        <DropStrip onFiles={stage} busy={busy} error={startError ? `The quote could not be started: ${message(startError)}` : undefined}
           title={staged.length ? 'Add more files, or start the quote' : 'Start a quote from an RFQ'}
           hint="Drop customer emails, spreadsheets, drawings, or models."
           actions={<button type="button" className="btn ghost" aria-expanded={help} aria-controls="intake-help" onClick={() => setHelp(!help)}><Icon name="info" />What it reads</button>}>
@@ -274,14 +276,13 @@ export function Board() {
           )}
         </DropStrip>
       )}
-      <ErrorBanner error={startError} />
 
       <div className="metrics" role="group" aria-label="Summary; pick one to show only those quotes">
         {metric('attention', tally.attention, mine ? 'Needs your attention' : 'Needs attention', 'Ready to send, or a department has asked a question', tally.attention > 0 ? 'attention' : undefined)}
         {metric('estimating', tally.estimating, 'With departments', 'Out with the departments for prices')}
         {metric('sent', tally.sent, 'With customers', 'Sent, waiting on the customer’s decision')}
         {metric('late', tally.late, 'Overdue', 'Not sent yet, and past the date the customer wanted the quote', tally.late > 0 ? 'late' : undefined)}
-        {metric('won', usdShort(tally.wonValue), 'Won · last 45 days', 'Award amounts of the quotes won in the last 45 days')}
+        {metric('won', usdShort(tally.wonValue), 'Won · last 45 days', 'Award amounts of the quotes won in the last 45 days', tally.wonValue > 0 ? 'won' : undefined)}
       </div>
 
       <div className="toolbar">
@@ -311,15 +312,17 @@ export function Board() {
           return (
             <section className="column" key={col.key} aria-labelledby={`col-${col.key}`}>
               <header className="column-head">
+                <span className={`stage-mark ${col.key}`} aria-hidden="true" />
                 <h2 id={`col-${col.key}`}>{col.title}</h2>
-                <span className="badge" aria-label={`${list.length} quote${list.length === 1 ? '' : 's'}`}>{list.length}</span>
+                {data && <span className={`badge${list.length ? '' : ' zero'}`} aria-label={`${list.length} quote${list.length === 1 ? '' : 's'}`}>{list.length}</span>}
               </header>
               <div className="column-body">
                 {list.map((c) => <Card key={c.id} c={c} />)}
                 {data && list.length === 0 && (
-                  <p className="column-empty">{filtered ? 'Nothing here matches.' : col.key === 'draft' && !seller ? 'No drafts.' : col.empty}</p>
+                  <p className="column-empty"><Icon name={filtered ? 'search' : col.icon} />{filtered ? 'Nothing here matches.' : col.key === 'draft' && !seller ? 'No drafts.' : col.empty}</p>
                 )}
-                {!data && !error && <p className="column-empty">Loading…</p>}
+                {!data && !error && <p className="column-empty" aria-busy="true"><Icon name="clock" />Loading quotes…</p>}
+                {!data && !!error && <p className="column-empty problem"><Icon name="alert" />Could not load.</p>}
               </div>
             </section>
           );

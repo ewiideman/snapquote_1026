@@ -2,11 +2,11 @@ import { StrictMode, useCallback, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import '@fontsource-variable/inter/wght.css';
 import './styles.css';
-import logoUrl from './assets/snapquote-logo.png';
 import { get, post, SIGNED_OUT_EVENT } from './lib/api.ts';
 import { useRoute } from './lib/router.ts';
 import type { Account, BoardCard, Department, QueueItem } from './lib/types.ts';
-import { AppContext, canSell, Icon, ROLE_NAMES, Toast, type AppState, type IconName } from './components/ui.tsx';
+import { AppContext, BrandMark, canSell, Icon, ROLE_NAMES, ThemeMenu, Toast, type AppState, type IconName } from './components/ui.tsx';
+import { useTheme } from './lib/theme.ts';
 import { SignIn, ChangePassword, AccountPage } from './pages/SignIn.tsx';
 import { Board, DeletedQuotes } from './pages/Board.tsx';
 import { Queue } from './pages/Queue.tsx';
@@ -18,7 +18,7 @@ import { WorkCells } from './pages/WorkCells.tsx';
 function Brand() {
   return (
     <span className="brand">
-      <img className="brand-logo" src={logoUrl} alt="" />
+      <BrandMark />
       <span className="brand-name">SnapQuote</span>
     </span>
   );
@@ -43,6 +43,7 @@ function App() {
   const [counts, setCounts] = useState<{ attention: number; queue: number }>({ attention: 0, queue: 0 });
   const [menu, setMenu] = useState(false);
   const route = useRoute();
+  useTheme(); // keeps the page's theme in step with the computer's setting while SnapQuote is open
   useEffect(() => { setMenu(false); }, [route.path]);
   useEffect(() => {
     if (!menu) return;
@@ -110,6 +111,7 @@ function App() {
         <aside className={`sidebar${menu ? ' open' : ''}`}>
           <div className="side-top">
             <a href="#/" className="brand-link" aria-label="SnapQuote home"><Brand /></a>
+            <ThemeMenu where="top" />
             <button type="button" className="icon-btn menu-btn" aria-expanded={menu} aria-controls="side-menu" aria-label={menu ? 'Close the menu' : 'Open the menu'} onClick={() => setMenu(!menu)}>
               <Icon name={menu ? 'close' : 'menu'} />
               {!menu && waiting > 0 && <span className="menu-dot" aria-hidden="true" />}
@@ -130,6 +132,7 @@ function App() {
                 <span className="avatar" aria-hidden="true">{initials(account.displayName)}</span>
                 <span className="label"><b>{account.displayName}</b><small>{account.role === 'estimator' && account.department ? state.deptName(account.department) : ROLE_NAMES[account.role]}</small></span>
               </a>
+              <ThemeMenu where="foot" />
               <button type="button" className="icon-btn signout" onClick={signOut} title="Sign out" data-tip="Sign out"><Icon name="signout" /><span className="sr">Sign out</span></button>
             </div>
           </div>

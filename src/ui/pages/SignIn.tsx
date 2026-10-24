@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { patch, post, message } from '../lib/api.ts';
 import type { Account, Department } from '../lib/types.ts';
-import logoUrl from '../assets/snapquote-logo.png';
+import { BrandMark, ThemeChoices } from '../components/ui.tsx';
 
 export function SignIn({ onSignedIn }: { onSignedIn: (a: Account, d: Department[]) => void }) {
   const [id, setId] = useState('');
@@ -24,7 +24,7 @@ export function SignIn({ onSignedIn }: { onSignedIn: (a: Account, d: Department[
         }
       }}>
         <span className="brand">
-          <img className="brand-logo" src={logoUrl} alt="" />
+          <BrandMark />
           SnapQuote
         </span>
         <p className="muted">Quotes for Mack Molding, from RFQ to order.</p>
@@ -95,6 +95,11 @@ export function AccountPage({ account, onChanged }: { account: Account; onChange
         </label>
         {!account.email && account.emailNotifications && <div className="banner warn">Add your address, or SnapQuote has nowhere to write.</div>}
         {error && <div className="banner error">{error}</div>}
+      </div>
+      <div className="card pad stack" style={{ maxWidth: 520 }}>
+        <h2>Appearance</h2>
+        <p className="muted">Light, dark, or whichever this computer is set to. It is remembered in this browser.</p>
+        <div><ThemeChoices /></div>
       </div>
       <ChangePassword embedded onDone={() => onChanged(account, 'Your password is changed.')} />
     </div>

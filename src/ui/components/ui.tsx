@@ -1,7 +1,8 @@
-import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import type { Account, Department, DepartmentKey, RequestStatus } from '../lib/types.ts';
 import { dueTone, dueWords } from '../lib/format.ts';
 import { message } from '../lib/api.ts';
+import { useTheme, type ThemeChoice } from '../lib/theme.ts';
 
 // ---------------------------------------------------------------- who is signed in
 
@@ -52,6 +53,10 @@ const ICONS = {
   close: <path d="M6 6l12 12M18 6L6 18" />,
   trash: <><path d="M4 7h16M10 11v6M14 11v6" /><path d="M6 7l1 12a2 2 0 002 2h6a2 2 0 002-2l1-12M9 7V4h6v3" /></>,
   signout: <><path d="M14 4h4a2 2 0 012 2v12a2 2 0 01-2 2h-4" /><path d="M9.5 16.5L5 12l4.5-4.5M5 12h11" /></>,
+  sun: <><circle cx="12" cy="12" r="4" /><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4" /></>,
+  moon: <path d="M19.5 14.5A8 8 0 019.5 4.5a8 8 0 1010 10z" />,
+  monitor: <><rect x="3" y="4" width="18" height="12.5" rx="2" /><path d="M8.5 20h7M12 16.5V20" /></>,
+  filter: <path d="M4 5h16l-6.2 7.4V19l-3.6-1.8v-4.8z" />,
 };
 export type IconName = keyof typeof ICONS;
 export function Icon({ name, className }: { name: IconName; className?: string }) {
@@ -59,6 +64,100 @@ export function Icon({ name, className }: { name: IconName; className?: string }
     <svg viewBox="0 0 24 24" aria-hidden="true" className={className} fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round">
       {ICONS[name]}
     </svg>
+  );
+}
+
+/**
+ * The "SQ" mark: SnapQuote V2's logo drawn as a vector, so it is sharp at any size. It takes its color
+ * from the brand-logo class.
+ */
+export function BrandMark({ className = 'brand-logo' }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 41 25" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth={5} strokeLinejoin="round">
+      <path d="M15.2 6.6C14.3 4.4 12.4 3.2 9.9 3.2 6.9 3.2 4.6 4.9 4.6 7.4c0 5.6 11 3.6 11 9.9 0 2.7-2.5 4.6-5.8 4.6-2.8 0-5-1.3-6.1-3.6" />
+      <circle cx="29.2" cy="12.5" r="8.3" />
+      <path d="M32.3 17.8l5.3 5.2" />
+    </svg>
+  );
+}
+
+const THEMES: { key: ThemeChoice; label: string; icon: IconName }[] = [
+  { key: 'system', label: 'System', icon: 'monitor' },
+  { key: 'light', label: 'Light', icon: 'sun' },
+  { key: 'dark', label: 'Dark', icon: 'moon' },
+];
+
+/**
+ * Light, dark, or the computer's setting: a button that opens the three choices. The sidebar has one
+ * beside the brand and one in its foot, for the icon rail; the stylesheet shows the one that fits.
+ */
+export function ThemeMenu({ where }: { where: 'top' | 'foot' }) {
+  const [choice, setChoice] = useTheme();
+  const [open, setOpen] = useState(false);
+  const id = useId();
+  const box = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const away = (e: MouseEvent) => { if (!box.current?.contains(e.target as Node)) setOpen(false); };
+    const key = (e: KeyboardEvent) => { if (e.key === 'Escape') { setOpen(false); box.current?.querySelector<HTMLButtonElement>('.icon-btn')?.focus(); } };
+    document.addEventListener('mousedown', away);
+    document.addEventListener('keydown', key);
+    return () => { document.removeEventListener('mousedown', away); document.removeEventListener('keydown', key); };
+  }, [open]);
+  const now = THEMES.find((t) => t.key === choice) ?? THEMES[0]!;
+  return (
+    <div className={`theme ${where}`} ref={box}>
+      <button type="button" className="icon-btn" aria-expanded={open} aria-controls={id} title={`Theme: ${now.key === 'system' ? 'same as this computer' : now.label}`} data-tip="Theme" onClick={() => setOpen(!open)}>
+        <Icon name={now.icon} /><span className="sr">Theme: {now.label}</span>
+      </button>
+      {open && (
+        <div className="popover theme-choices" id={id} role="group" aria-label="Theme">
+          {THEMES.map((t) => (
+            <button type="button" key={t.key} aria-pressed={choice === t.key} onClick={() => { setChoice(t.key); setOpen(false); }}>
+              <Icon name={t.icon} /><span className="grow">{t.label}</span>{choice === t.key && <Icon name="check" className="tick" />}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** The same three choices as a segmented control, for the account page. */
+export function ThemeChoices() {
+  const [choice, setChoice] = useTheme();
+  return (
+    <div className="seg" role="group" aria-label="Theme">
+      {THEMES.map((t) => (
+        <button type="button" key={t.key} className={choice === t.key ? 'on' : ''} aria-pressed={choice === t.key} onClick={() => setChoice(t.key)}>
+          <Icon name={t.icon} />{t.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * One line of text that wraps and grows to show itself whole, such as a part's description in a table.
+ * Enter finishes, as in a one-line field.
+ */
+export function GrowingText({ value, onChange, onBlur, className = 'bare', placeholder, ...rest }: { value: string; onChange: (v: string) => void; onBlur?: () => void; className?: string; placeholder?: string; 'aria-label'?: string }) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+  const fit = () => { const el = ref.current; if (el) { el.style.height = 'auto'; el.style.height = `${el.scrollHeight + 2}px`; } };
+  useEffect(fit, [value]);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    let w = el.offsetWidth;
+    const ro = new ResizeObserver(() => { if (el.offsetWidth !== w) { w = el.offsetWidth; fit(); } });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  return (
+    <textarea ref={ref} className={className} rows={1} value={value} placeholder={placeholder} aria-label={rest['aria-label']}
+      onChange={(e) => onChange(e.target.value.replace(/\n+/g, ' '))}
+      onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); e.currentTarget.blur(); } }}
+      onBlur={onBlur} />
   );
 }
 
@@ -112,7 +211,7 @@ export function DropZone({ onFiles, title, hint, compact, busy, accept }: { onFi
       <div className="icon"><Icon name="upload" /></div>
       <div><strong>{title}</strong><span>{hint}</span></div>
       <input ref={input} type="file" multiple accept={accept} onChange={(e) => { const f = [...(e.target.files ?? [])]; e.target.value = ''; if (f.length) onFiles(f); }} />
-      {busy && <div className="busy">{busy}</div>}
+      {busy && <div className="busy" role="status"><Icon name="upload" />{busy}</div>}
     </div>
   );
 }
@@ -122,12 +221,12 @@ export function DropZone({ onFiles, title, hint, compact, busy, accept }: { onFi
  * it, several at once or one at a time; any type is taken. Children (help, files waiting) sit inside it,
  * so dropping on them works too.
  */
-export function DropStrip({ onFiles, title, hint, busy, accept, actions, children }: { onFiles: (files: File[]) => void; title: ReactNode; hint: ReactNode; busy?: string | null; accept?: string; actions?: ReactNode; children?: ReactNode }) {
+export function DropStrip({ onFiles, title, hint, busy, accept, actions, children, error }: { onFiles: (files: File[]) => void; title: ReactNode; hint: ReactNode; busy?: string | null; accept?: string; actions?: ReactNode; children?: ReactNode; error?: ReactNode }) {
   const [over, setOver] = useState(false);
   const input = useRef<HTMLInputElement>(null);
   return (
     <div
-      className={`drop strip${over ? ' over' : ''}`}
+      className={`drop strip${over ? ' over' : ''}${error ? ' failed' : ''}`}
       onDragOver={(e) => { e.preventDefault(); if (!over) setOver(true); }}
       onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setOver(false); }}
       onDrop={(e) => {
@@ -145,10 +244,11 @@ export function DropStrip({ onFiles, title, hint, busy, accept, actions, childre
           <button type="button" className="btn" onClick={() => input.current?.click()} disabled={!!busy}><Icon name="upload" />Upload files</button>
         </div>
       </div>
+      {error && <div className="strip-error" role="alert"><Icon name="alert" /><span>{error}</span></div>}
       {children}
       <input ref={input} type="file" multiple accept={accept} tabIndex={-1} aria-hidden="true" onChange={(e) => { const f = [...(e.target.files ?? [])]; e.target.value = ''; if (f.length) onFiles(f); }} />
-      {over && <div className="drop-hint" aria-hidden="true">Drop to add to the new quote</div>}
-      {busy && <div className="busy" role="status">{busy}</div>}
+      {over && <div className="drop-hint" aria-hidden="true"><Icon name="upload" />Drop to add to the new quote</div>}
+      {busy && <div className="busy" role="status"><Icon name="upload" />{busy}</div>}
     </div>
   );
 }

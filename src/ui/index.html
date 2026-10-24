@@ -3,8 +3,27 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
     <title>SnapQuote</title>
-    <link rel="icon" type="image/png" href="./assets/snapquote-icon.png" />
+    <link rel="icon" type="image/svg+xml" href="./assets/snapquote-icon.svg" />
+    <link rel="alternate icon" type="image/png" href="./assets/snapquote-icon.png" />
+    <script>
+      // The saved theme (src/ui/lib/theme.ts), before anything is drawn, so a dark page never flashes light.
+      (function () {
+        var choice = null;
+        try { choice = localStorage.getItem('snapquote.theme'); } catch (e) {}
+        var dark = choice === 'dark' || (choice !== 'light' && window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches);
+        document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+        // Native pickers and suggestion lists (Safari's especially) follow this, not the stylesheet.
+        var meta = document.querySelector('meta[name="color-scheme"]');
+        if (meta) meta.setAttribute('content', dark ? 'dark' : 'light');
+      })();
+    </script>
+    <style>
+      /* Until the stylesheet loads, the page is already its theme's color. */
+      html { background: #f3f5f8; }
+      html[data-theme="dark"] { background: #13161b; }
+    </style>
   </head>
   <body>
     <div id="root"></div>

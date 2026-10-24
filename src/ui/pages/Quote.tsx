@@ -5,8 +5,8 @@ import { get, patch, post, put, upload, del } from '../lib/api.ts';
 import { useAsync } from '../lib/useAsync.ts';
 import type { DepartmentKey, DropResult, Line, QuoteDetail } from '../lib/types.ts';
 import { STAGE_NAMES } from '../lib/types.ts';
-import { canEstimate, canSell, DateField, DeptChip, Dialog, DropZone, Due, ErrorBanner, plausibleDate, useApp } from '../components/ui.tsx';
-import { ago, fileSize, qty, shortDate, usd } from '../lib/format.ts';
+import { canEstimate, canSell, DateField, DeptChip, Dialog, DropZone, ErrorBanner, GrowingText, plausibleDate, useApp } from '../components/ui.tsx';
+import { ago, daysUntil, dueTone, dueWords, fileSize, qty, shortDate, usd } from '../lib/format.ts';
 import { PricePanel } from './PricePanel.tsx';
 
 // ---------------------------------------------------------------- quantities
@@ -376,6 +376,9 @@ function Parts({ d, editable, onSaved, onDirty, onSaveState, openPrice }: { d: Q
   const showPrices = d.quote.status !== 'draft';
   const allSame = rows.length > 1 && rows.every((r) => r.department === rows[0]?.department) ? rows[0]?.department : undefined;
 
+  // The last column holds the price button when there is one, and the remove button.
+  const priceButtons = d.lines.some((l) => (d.quote.status === 'estimating' && canEstimate(app.account, l.department)) || !!l.estimate);
+  const actionsWidth = priceButtons ? (editable ? 136 : 112) : 40;
   return (
     <div className="section">
       <header>
@@ -391,13 +394,18 @@ function Parts({ d, editable, onSaved, onDirty, onSaveState, openPrice }: { d: Q
       {rows.length === 0 ? (
         <div className="empty">{editable ? 'Drop a parts list or BOM spreadsheet under Files, or add parts one at a time.' : 'No parts.'}</div>
       ) : (
-        <table className="grid edit">
+        <table className="grid edit parts">
+          <colgroup>
+            <col className="c-pos" /><col /><col className="c-qty" /><col className="c-who" />
+            {showPrices && <col className="c-price" />}
+            <col style={{ width: actionsWidth }} />
+          </colgroup>
           <thead>
             <tr>
-              <th className="tight">#</th><th>Part number</th><th className="tight">Rev</th><th>Description</th>
-              <th className="tight right" title="How many of this part go into one assembly">Qty per assembly</th><th>Who prices it</th>
-              {showPrices && <th className="tight right">{firstQty ? `Each at ${qty(firstQty)}` : 'Price'}</th>}
-              <th className="tight" />
+              <th>#</th><th>Part</th>
+              <th className="right" title="How many of this part go into one assembly">Qty per assembly</th><th>Who prices it</th>
+              {showPrices && <th className="right">{firstQty ? `Each at ${qty(firstQty)}` : 'Price'}</th>}
+              <th />
             </tr>
           </thead>
           <tbody>
@@ -407,10 +415,17 @@ function Parts({ d, editable, onSaved, onDirty, onSaveState, openPrice }: { d: Q
               const mineToPrice = !!line && d.quote.status === 'estimating' && canEstimate(app.account, line.department);
               return (
                 <tr key={r.key} className={mineToPrice ? 'mine' : ''}>
-                  <td className="tight muted" style={{ paddingLeft: 10 }}>{i + 1}</td>
-                  <td>{editable ? <input className="bare mono" value={r.partNumber} placeholder="Part number" onChange={(e) => edit(r.key, { partNumber: e.target.value })} onBlur={() => dirty && save()} /> : <span className="mono">{r.partNumber}</span>}</td>
-                  <td className="tight">{editable ? <input className="bare" style={{ width: 52 }} value={r.revision} onChange={(e) => edit(r.key, { revision: e.target.value })} onBlur={() => dirty && save()} /> : r.revision}</td>
-                  <td>{editable ? <input className="bare" value={r.description} placeholder="Description" onChange={(e) => edit(r.key, { description: e.target.value })} onBlur={() => dirty && save()} /> : r.description}
+                  <td className="pos" style={{ paddingLeft: 10 }}>{i + 1}</td>
+                  <td className="part">
+                    {/* The part number and revision on one line, the description under them with the row's width to itself. */}
+                    {editable ? (
+                      <div className="part-line">
+                        <input className="bare mono pn" value={r.partNumber} placeholder="Part number" aria-label={`Part number of part ${i + 1}`} onChange={(e) => edit(r.key, { partNumber: e.target.value })} onBlur={() => dirty && save()} />
+                        <label className="rev"><span>Rev</span><input className="bare" value={r.revision} aria-label={`Revision of part ${i + 1}`} onChange={(e) => edit(r.key, { revision: e.target.value })} onBlur={() => dirty && save()} /></label>
+                        {r.quantities.length === 0 && !ownOpen.has(r.key) && <button className="link row-more own-link" onClick={() => setOwnOpen((o) => new Set(o).add(r.key))}>Own quantities…</button>}
+                      </div>
+                    ) : <div className="part-line read"><span className="mono">{r.partNumber || '—'}</span>{r.revision && <span className="muted small">Rev {r.revision}</span>}</div>}
+                    {editable ? <GrowingText value={r.description} placeholder="Description" aria-label={`Description of part ${i + 1}`} onChange={(v) => edit(r.key, { description: v })} onBlur={() => dirty && save()} /> : <div className="desc">{r.description}</div>}
                     {r.notes && <div className="sub" style={{ paddingLeft: editable ? 7 : 0 }}>{r.notes}</div>}
                     {editable && (r.quantities.length > 0 || ownOpen.has(r.key)) ? (
                       <div className="sub own-qty" style={{ paddingLeft: 7 }}>
@@ -418,11 +433,9 @@ function Parts({ d, editable, onSaved, onDirty, onSaveState, openPrice }: { d: Q
                         <Quantities value={r.quantities} disabled={false} onChange={(q) => edit(r.key, { quantities: q }, true)} />
                         <button className="link" onClick={() => { setOwnOpen((o) => { const n = new Set(o); n.delete(r.key); return n; }); if (r.quantities.length) edit(r.key, { quantities: [] }, true); }}>Use the quote's quantities</button>
                       </div>
-                    ) : editable ? (
-                      <div className="sub row-more" style={{ paddingLeft: 7 }}><button className="link" onClick={() => setOwnOpen((o) => new Set(o).add(r.key))}>Own quantities…</button></div>
-                    ) : r.quantities.length > 0 && <div className="sub">Own quantities: {r.quantities.map(qty).join(', ')} pieces</div>}
+                    ) : !editable && r.quantities.length > 0 && <div className="sub">Own quantities: {r.quantities.map(qty).join(', ')} pieces</div>}
                   </td>
-                  <td className="tight">{r.quantities.length > 0 ? <span className="muted small" title="This part is priced at its own quantities, so quantity per assembly is not used.">own</span> : editable ? <input className="bare num" style={{ width: 64 }} value={String(r.qtyPer)} onChange={(e) => { const n = Number(e.target.value); if (n > 0) edit(r.key, { qtyPer: n }); }} onBlur={() => dirty && save()} /> : <span className="right">{qty(r.qtyPer)}</span>}</td>
+                  <td className="right">{r.quantities.length > 0 ? <span className="muted small" title="This part is priced at its own quantities, so quantity per assembly is not used.">own</span> : editable ? <input className="bare num" value={String(r.qtyPer)} onChange={(e) => { const n = Number(e.target.value); if (n > 0) edit(r.key, { qtyPer: n }); }} onBlur={() => dirty && save()} /> : <span className="right">{qty(r.qtyPer)}</span>}</td>
                   <td>{editable ? (
                     <select className="bare" value={r.department ?? ''} onChange={(e) => edit(r.key, { department: (e.target.value || null) as DepartmentKey | null }, true)} style={!r.department ? { color: 'var(--late)' } : undefined}>
                       <option value="">Choose…</option>
@@ -430,11 +443,11 @@ function Parts({ d, editable, onSaved, onDirty, onSaveState, openPrice }: { d: Q
                     </select>
                   ) : app.deptName(r.department)}</td>
                   {showPrices && (
-                    <td className="tight right">
+                    <td className="right">
                       {cell?.unitPrice !== null && cell?.unitPrice !== undefined ? <span className={cell.override !== null ? 'ov' : ''}>{usd(cell.unitPrice)}</span> : <span className="muted small">{line?.estimate ? '—' : 'not yet'}</span>}
                     </td>
                   )}
-                  <td className="tight">
+                  <td className="actions">
                     {mineToPrice && line && <button className={`btn small ${line.estimate ? '' : 'primary'}`} onClick={() => openPrice(line)}>{line.estimate ? 'Change price' : 'Price it'}</button>}
                     {!mineToPrice && line?.estimate && <button className="btn small ghost" onClick={() => openPrice(line)}>See price</button>}
                     {editable && <button className="closex" title="Remove this part" onClick={() => { const next = rows.filter((x) => x.key !== r.key); setRows(next); setDirty(true); void save(next); }}>×</button>}
@@ -476,7 +489,7 @@ function Files({ d, onChange }: { d: QuoteDetail; onChange: (n?: QuoteDetail) =>
         if (n) said.push(`${n} part${n === 1 ? '' : 's'} from ${f.name}${sheets.length > 1 ? ` (sheets ${sheets.join(', ')})` : ''}`);
         const dup = r.linesAdded.reduce((s, l) => s + l.alreadyOnQuote, 0);
         if (dup) repeats.push(`${dup} part${dup === 1 ? '' : 's'} in ${f.name} ${dup === 1 ? 'was' : 'were'} already on the quote and not added again.`);
-        if (r.fromEmail) said.push(`the email from ${r.fromEmail.from}`);
+        if (r.fromEmail) said.push(`the email from ${r.fromEmail.from}${r.fromEmail.read.length ? `, and read from it ${r.fromEmail.read.join('; ')}` : ''}`);
         if (r.attachments.length > 1) said.push(`${r.attachments.length - 1} attachment${r.attachments.length === 2 ? '' : 's'}`);
       } catch (err) { setError(err); }
     }
@@ -556,6 +569,26 @@ function Conversation({ d, onChange }: { d: QuoteDetail; onChange: (n: QuoteDeta
 
 // ---------------------------------------------------------------- the page
 
+/**
+ * The quote's title, edited in place: it wraps and grows to show a long title whole, and Enter saves it
+ * as leaving the field does (a title is one line of text).
+ */
+function TitleField({ value, onSave }: { value: string; onSave: (v: string) => void }) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+  const fit = () => { const el = ref.current; if (el) { el.style.height = 'auto'; el.style.height = `${el.scrollHeight}px`; } };
+  useEffect(() => {
+    fit();
+    window.addEventListener('resize', fit);
+    return () => window.removeEventListener('resize', fit);
+  }, []);
+  return (
+    <textarea ref={ref} className="title-field" rows={1} defaultValue={value} aria-label="Quote title" placeholder="What is the customer asking for?"
+      onInput={fit}
+      onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); e.currentTarget.blur(); } }}
+      onBlur={(e) => onSave(e.target.value.replace(/\s*\n+\s*/g, ' ').trim())} />
+  );
+}
+
 export function QuotePage({ id }: { id: number }) {
   const app = useApp();
   const { data, error, reload } = useAsync(() => get<QuoteDetail>(`/quotes/${id}`), [id]);
@@ -573,6 +606,10 @@ export function QuotePage({ id }: { id: number }) {
   const deleted = !!q?.deletedAt;
   const editableHeader = seller && !closed && !deleted;
   const editableParts = seller && !!q && !deleted && (q.status === 'draft' || q.status === 'estimating');
+  // How soon the customer's date is, inside its field: only when it is near or past (the date says the rest).
+  const dueOn = q?.customerDueOn ?? null;
+  const dueNote = dueOn && !closed && q?.status !== 'sent' && daysUntil(dueOn) <= 14
+    ? <span className={`field-note ${dueTone(dueOn)}`}>{dueWords(dueOn)}</span> : null;
   const [deleting, setDeleting] = useState(false);
   const restore = async () => {
     setActionError(null);
@@ -599,7 +636,7 @@ export function QuotePage({ id }: { id: number }) {
             {editableHeader && <SaveStatus state={saveState} dirty={partsDirty} />}
           </div>
           <h1>{editableHeader
-            ? <input defaultValue={q.title} key={`t${q.updatedAt}`} placeholder="What is the customer asking for?" onBlur={(e) => e.target.value !== q.title && save({ title: e.target.value })} />
+            ? <TitleField value={q.title} key={`t${q.updatedAt}`} onSave={(v) => v !== q.title && save({ title: v })} />
             : (q.title || 'Untitled quote')}</h1>
           {q.sourceEmail && <div className="muted small">From the email “{q.sourceEmail.subject}” · {q.sourceEmail.from}</div>}
         </div>
@@ -623,7 +660,7 @@ export function QuotePage({ id }: { id: number }) {
         <div className="stack">
           <div className="section">
             <div className="body">
-              <div className="grid3">
+              <div className="grid3 head-grid">
                 <label className="field">Customer
                   {editableHeader ? (
                     <>
@@ -631,36 +668,40 @@ export function QuotePage({ id }: { id: number }) {
                         onBlur={(e) => e.target.value.trim() !== (q.customerName ?? '') && save({ customerName: e.target.value })} />
                       <datalist id="customers">{customerList.map((c) => <option key={c.id} value={c.name} />)}</datalist>
                     </>
-                  ) : <span style={{ color: 'var(--ink)', fontSize: 14 }}>{q.customerName ?? '—'}</span>}
+                  ) : <span className="value">{q.customerName ?? '—'}</span>}
                 </label>
                 <label className="field">Contact
                   {editableHeader ? <input defaultValue={q.contactName ?? ''} key={`n${q.updatedAt}`} onBlur={(e) => e.target.value !== (q.contactName ?? '') && save({ contactName: e.target.value })} />
-                    : <span style={{ color: 'var(--ink)', fontSize: 14 }}>{q.contactName ?? '—'}</span>}
+                    : <span className="value">{q.contactName ?? '—'}</span>}
                 </label>
                 <label className="field">Contact email
                   {editableHeader ? <input type="email" defaultValue={q.contactEmail ?? ''} key={`e${q.updatedAt}`} onBlur={(e) => e.target.value !== (q.contactEmail ?? '') && save({ contactEmail: e.target.value })} />
-                    : <span style={{ color: 'var(--ink)', fontSize: 14 }}>{q.contactEmail ? <a href={`mailto:${q.contactEmail}`}>{q.contactEmail}</a> : '—'}</span>}
+                    : <span className="value">{q.contactEmail ? <a href={`mailto:${q.contactEmail}`}>{q.contactEmail}</a> : '—'}</span>}
                 </label>
                 <label className="field">RFQ received
                   {editableHeader ? <DateField value={q.rfqReceivedOn} onSave={(v) => save({ rfqReceivedOn: v })} />
-                    : <span style={{ color: 'var(--ink)', fontSize: 14 }}>{shortDate(q.rfqReceivedOn) || '—'}</span>}
+                    : <span className="value">{shortDate(q.rfqReceivedOn) || '—'}</span>}
                 </label>
-                <label className="field"><span>Customer wants it by {!closed && q.status !== 'sent' && <Due date={q.customerDueOn} />}</span>
-                  {editableHeader ? <DateField value={q.customerDueOn} onSave={(v) => save({ customerDueOn: v })} />
-                    : <span style={{ color: 'var(--ink)', fontSize: 14 }}>{shortDate(q.customerDueOn) || '—'}</span>}
+                <label className="field">Customer wants it by
+                  {editableHeader
+                    ? <span className={`with-note${dueNote ? ' has-note' : ''}`}><DateField value={q.customerDueOn} onSave={(v) => save({ customerDueOn: v })} />{dueNote}</span>
+                    : <span className="value">{shortDate(q.customerDueOn) || '—'}{dueNote}</span>}
                 </label>
                 <label className="field">Business development
-                  {editableHeader ? <OwnerPicker value={q.ownerId} onChange={(ownerId) => save({ ownerId })} /> : <span style={{ color: 'var(--ink)', fontSize: 14 }}>{q.ownerName}</span>}
+                  {editableHeader ? <OwnerPicker value={q.ownerId} onChange={(ownerId) => save({ ownerId })} /> : <span className="value">{q.ownerName}</span>}
                 </label>
               </div>
-              <div className="row wrap" style={{ marginTop: 14, alignItems: 'flex-start', gap: 24 }}>
-                <div className="field" style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12.5, color: 'var(--muted)', fontWeight: 550 }}>
-                  Quantities (assemblies)
+              <div className="grid3" style={{ marginTop: 14 }}>
+                <div className="field span2">
+                  <span>Quantities (assemblies)</span>
                   <Quantities value={q.quantities} disabled={!editableParts} onChange={(quantities) => save({ quantities })} />
                 </div>
-                <label className="row small" style={{ marginTop: 22 }}>
-                  <input type="checkbox" checked={q.itar} disabled={!editableHeader} onChange={(e) => save({ itar: e.target.checked })} /> ITAR controlled
-                </label>
+                <div className="field">
+                  <span>Export control</span>
+                  <label className="field-check">
+                    <input type="checkbox" checked={q.itar} disabled={!editableHeader} onChange={(e) => save({ itar: e.target.checked })} /> ITAR controlled
+                  </label>
+                </div>
               </div>
             </div>
           </div>
