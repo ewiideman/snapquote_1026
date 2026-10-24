@@ -6,16 +6,30 @@ import type { Account } from '../persistence/accounts.ts';
 import { HttpError } from '../persistence/util.ts';
 import { referenceRows } from '../persistence/reference.ts';
 import { saveEstimate } from '../persistence/quotes.ts';
-import { parseMetalsCalculationSettings, priceMetalsLine, validateMetalsLine, type MetalsCatalog, type MetalsLineInput, type MetalsLineResult, type MetalsMaterialItem, type MetalsWorkCell } from '../pricing/metals/index.ts';
+import { deriveMetalsItemAttributes, parseMetalsCalculationSettings, priceMetalsLine, resolveNestingParams, validateMetalsLine, type MetalsCatalog, type MetalsLineInput, type MetalsLineResult, type MetalsMaterialItem, type MetalsWorkCell } from '../pricing/metals/index.ts';
 
-export async function metalsCatalog(db: Queryable): Promise<{ catalog: MetalsCatalog; settings: unknown }> {
+export interface SheetFacts { thicknessIn: number; widthIn: number; lengthIn: number }
+
+/**
+ * The catalog, its settings, and for the screen what the engine reads from each sheet's item number
+ * (thickness and size) and the nesting margins it uses, so the estimator sees what is already known.
+ */
+export async function metalsCatalog(db: Queryable): Promise<{ catalog: MetalsCatalog; settings: unknown; sheets: Record<string, SheetFacts>; nesting: { lengthMarginIn: number; widthMarginIn: number; webIn: number } }> {
   const rows = (await referenceRows(db, 'metals')).filter((r) => r.active);
+  const materialItems = rows.filter((r) => r.kind === 'material').map((r) => r.data as MetalsMaterialItem).sort((a, b) => a.sortOrder - b.sortOrder);
+  const settings = rows.find((r) => r.kind === 'setting' && r.key === 'calculation')?.data ?? null;
+  const inch = (mm: number) => Math.round((mm / 25.4) * 1000) / 1000;
+  const sheets: Record<string, SheetFacts> = {};
+  for (const m of materialItems) {
+    const a = deriveMetalsItemAttributes(m.itemNumber, m.description);
+    if (a) sheets[m.itemNumber] = { thicknessIn: inch(a.thicknessMm), widthIn: inch(a.sheetWidthMm), lengthIn: inch(a.sheetLengthMm) };
+  }
+  const n = resolveNestingParams(undefined, parseMetalsCalculationSettings(settings));
   return {
-    catalog: {
-      workCells: rows.filter((r) => r.kind === 'work_cell').map((r) => r.data as MetalsWorkCell).sort((a, b) => a.sortOrder - b.sortOrder),
-      materialItems: rows.filter((r) => r.kind === 'material').map((r) => r.data as MetalsMaterialItem).sort((a, b) => a.sortOrder - b.sortOrder),
-    },
-    settings: rows.find((r) => r.kind === 'setting' && r.key === 'calculation')?.data ?? null,
+    catalog: { workCells: rows.filter((r) => r.kind === 'work_cell').map((r) => r.data as MetalsWorkCell).sort((a, b) => a.sortOrder - b.sortOrder), materialItems },
+    settings,
+    sheets,
+    nesting: { lengthMarginIn: n.lengthMarginIn, widthMarginIn: n.widthMarginIn, webIn: n.webIn },
   };
 }
 

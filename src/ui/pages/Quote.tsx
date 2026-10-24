@@ -3,9 +3,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { get, patch, post, put, upload, del } from '../lib/api.ts';
 import { useAsync } from '../lib/useAsync.ts';
-import type { DepartmentKey, DropResult, Line, QuoteDetail } from '../lib/types.ts';
+import type { Account, DepartmentKey, DropResult, Line, PartRow, PartsComparison, QuoteDetail } from '../lib/types.ts';
 import { STAGE_NAMES } from '../lib/types.ts';
-import { canEstimate, canSell, DateField, DeptChip, Dialog, DropZone, ErrorBanner, GrowingText, plausibleDate, useApp } from '../components/ui.tsx';
+import { canEstimate, canSell, DateField, DeptChip, Dialog, DropZone, ErrorBanner, GrowingText, plausibleDate, SuggestInput, useApp } from '../components/ui.tsx';
 import { ago, daysUntil, dueTone, dueWords, fileSize, qty, shortDate, usd } from '../lib/format.ts';
 import { PricePanel } from './PricePanel.tsx';
 
@@ -118,6 +118,28 @@ function draftProblems(d: QuoteDetail, lines: Line[]): string[] {
   return out;
 }
 
+const isPriced = (l: Line) => !!l.estimate && l.pieceQuantities.every((q) => l.estimate?.prices.some((p) => Math.abs(p.quantity - q) < 0.005));
+
+/** The departments a manager or administrator may mark done for: still open, and every one of their parts priced. */
+export function departmentsToMarkDone(d: QuoteDetail, account: Account): QuoteDetail['requests'] {
+  if (d.quote.status !== 'estimating' || account.role === 'estimator') return [];
+  return d.requests.filter((r) => r.status === 'open' && canEstimate(account, r.department)
+    && d.lines.some((l) => l.department === r.department) && d.lines.filter((l) => l.department === r.department).every(isPriced));
+}
+
+/** Each department's prices go back in turn, as its estimator's would. */
+export async function markDepartmentsDone(d: QuoteDetail, requests: QuoteDetail['requests']): Promise<QuoteDetail> {
+  let last: QuoteDetail | null = null;
+  for (const r of requests) last = await post<QuoteDetail>(`/quotes/${d.quote.id}/requests/${r.department}/answer`);
+  return last as QuoteDetail;
+}
+
+export function markDoneLabel(d: QuoteDetail, account: Account, requests: QuoteDetail['requests'], deptName: (k: string | null) => string): string {
+  const possessive = (name: string) => `${name}${name.endsWith('s') ? "'" : "'s"}`;
+  const who = requests.length === 1 ? deptName(requests[0]?.department ?? null) : requests.length === 2 ? 'both departments' : `all ${requests.length} departments`;
+  return d.quote.ownerId === account.id ? `Mark ${who} done` : `Send ${requests.length === 1 ? possessive(who) : `${who}'`} prices to ${d.quote.ownerName.split(' ')[0]}`;
+}
+
 function NextStep({ d, lines, reload, setError, dirty }: { d: QuoteDetail; lines: Line[]; reload: (n?: QuoteDetail) => void; setError: (e: unknown) => void; dirty: boolean }) {
   const app = useApp();
   const seller = canSell(app.account);
@@ -129,22 +151,9 @@ function NextStep({ d, lines, reload, setError, dirty }: { d: QuoteDetail; lines
     try { reload(await fn()); app.refreshCounts(); } catch (err) { setError(err); }
   };
   const myRequest = d.requests.find((r) => canEstimate(app.account, r.department) && app.account.role === 'estimator');
-  const isPriced = (l: Line) => !!l.estimate && l.pieceQuantities.every((q) => l.estimate?.prices.some((p) => Math.abs(p.quantity - q) < 0.005));
-  // A manager or administrator who priced a department's parts sends them back for it, as its estimator would.
-  const owner = d.quote.ownerName.split(' ')[0];
-  const sendBack = d.quote.status === 'estimating' && app.account.role !== 'estimator'
-    ? d.requests.filter((r) => r.status === 'open' && canEstimate(app.account, r.department) && d.lines.some((l) => l.department === r.department) && d.lines.filter((l) => l.department === r.department).every(isPriced))
-    : [];
-  // One button for all of them: each department's prices go back in turn, as its estimator's would.
-  const possessive = (name: string) => `${name}${name.endsWith('s') ? "'" : "'s"}`;
-  const selfOwned = d.quote.ownerId === app.account.id;
-  const who = sendBack.length === 1 ? app.deptName(sendBack[0]?.department ?? null) : sendBack.length === 2 ? 'both departments' : `all ${sendBack.length} departments`;
+  const sendBack = departmentsToMarkDone(d, app.account);
   const sendBackButtons = sendBack.length > 0 && (
-    <button className="btn" onClick={() => run(async () => {
-      let last: QuoteDetail | null = null;
-      for (const r of sendBack) last = await post<QuoteDetail>(`/quotes/${d.quote.id}/requests/${r.department}/answer`);
-      return last as QuoteDetail;
-    })}>{selfOwned ? `Mark ${who} done` : `Send ${sendBack.length === 1 ? possessive(who) : `${who}'`} prices to ${owner}`}</button>
+    <button className="btn" onClick={() => run(() => markDepartmentsDone(d, sendBack))}>{markDoneLabel(d, app.account, sendBack, app.deptName)}</button>
   );
 
   if (myRequest && d.quote.status === 'estimating') {
@@ -471,11 +480,86 @@ function Parts({ d, editable, onSaved, onDirty, onSaveState, openPrice }: { d: Q
 
 // ---------------------------------------------------------------- files and conversation
 
+const partName = (p: PartRow) => `${p.partNumber || p.description || 'Unnamed part'}${p.revision && p.revision !== '-' ? ` rev ${p.revision}` : ''}`;
+
+/**
+ * A parts list against the quote's parts: what it adds, what it no longer has, what it changes. Business
+ * development brings the parts up to it, adds only its new parts, or keeps them as they are.
+ */
+function PartsReview({ d, review, onDone }: { d: QuoteDetail; review: { attachmentId: number; fileName: string; comparison: PartsComparison }; onDone: (changed: boolean) => void }) {
+  const app = useApp();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+  const c = review.comparison;
+  const canChange = canSell(app.account) && (d.quote.status === 'draft' || d.quote.status === 'estimating') && !d.quote.deletedAt;
+  const differs = c.added.length + c.removed.length + c.changed.length > 0;
+  const deptOf = (id: number) => d.lines.find((l) => l.id === id)?.department ?? null;
+  const apply = async (mode: 'match' | 'add') => {
+    setBusy(true);
+    setError(null);
+    try {
+      await post(`/quotes/${d.quote.id}/files/${review.attachmentId}/parts`, { mode });
+      app.toast(mode === 'match' ? `The parts now match ${review.fileName}.` : `Added ${c.added.length} new part${c.added.length === 1 ? '' : 's'} from ${review.fileName}.`);
+      onDone(true);
+    } catch (err) { setError(err); setBusy(false); }
+  };
+  const words = (x: PartsComparison['changed'][number]) => x.what.map((w) =>
+    w === 'revision' ? `rev ${x.line.revision || '—'} → ${x.to.revision || '—'}`
+      : w === 'quantity' ? `quantity per assembly ${qty(x.line.qtyPer)} → ${qty(x.to.qtyPer)}`
+        : `description “${x.line.description}” → “${x.to.description}”`).join('; ');
+  return (
+    <Dialog wide title={`Compare with ${review.fileName}`} onClose={() => onDone(false)}
+      footer={!differs || !canChange
+        ? <button className="btn" onClick={() => onDone(false)}>Close</button>
+        : <>
+          <button className="btn ghost" disabled={busy} onClick={() => onDone(false)}>Keep the parts as they are</button>
+          {c.added.length > 0 && <button className="btn" disabled={busy} onClick={() => void apply('add')}>Add only the new parts</button>}
+          <button className="btn primary" disabled={busy} onClick={() => void apply('match')}>Update the parts to match</button>
+        </>}>
+      {!differs ? <p>This list has the same parts as the quote. Nothing to change.</p> : (
+        <>
+          <p className="muted">
+            {[c.same && `${c.same} the same`, c.changed.length && `${c.changed.length} changed`, c.added.length && `${c.added.length} new`, c.removed.length && `${c.removed.length} no longer listed`].filter(Boolean).join(' · ')}.
+            {' '}Nothing on the quote has changed yet.
+          </p>
+          <div className="compare">
+            {c.changed.length > 0 && (
+              <section><h3>Changed</h3><ul>{c.changed.map((x) => <li key={x.line.id}><span className="mono">{partName(x.line)}</span><span>{words(x)}</span></li>)}</ul></section>
+            )}
+            {c.added.length > 0 && (
+              <section><h3>New in this list</h3><ul>{c.added.map((p, i) => <li key={i}><span className="mono">{partName(p)}</span><span>{p.description} · {qty(p.qtyPer)} per assembly</span></li>)}</ul></section>
+            )}
+            {c.removed.length > 0 && (
+              <section><h3>No longer in this list</h3><ul>{c.removed.map((l) => <li key={l.id}><span className="mono">{partName(l)}</span><span>{l.description}{deptOf(l.id) ? ` · priced by ${app.deptName(deptOf(l.id))}` : ''}</span></li>)}</ul></section>
+            )}
+          </div>
+          {canChange && (
+            <p className="hint">Updating marks the parts no longer listed as removed (nothing is deleted) and adds the new ones for you to choose who prices them.{d.quote.status === 'estimating' ? ' A department pricing a changed or removed part gets it back to check.' : ''}</p>
+          )}
+        </>
+      )}
+      <ErrorBanner error={error} />
+    </Dialog>
+  );
+}
+
+const isPartsList = (name: string) => /\.(xlsx|xlsm|csv)$/i.test(name);
+
 function Files({ d, onChange }: { d: QuoteDetail; onChange: (n?: QuoteDetail) => void }) {
   const app = useApp();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<unknown>(null);
+  // Parts lists waiting to be reviewed against the quote's parts, one at a time.
+  const [reviews, setReviews] = useState<DropResult['review']>([]);
   const closed = ['won', 'lost', 'no_bid'].includes(d.quote.status);
+  const canCompare = canSell(app.account) && (d.quote.status === 'draft' || d.quote.status === 'estimating') && !d.quote.deletedAt && d.lines.length > 0;
+  const compare = async (attachmentId: number) => {
+    setError(null);
+    try {
+      const r = await get<{ fileName: string; comparison: PartsComparison }>(`/quotes/${d.quote.id}/files/${attachmentId}/parts`);
+      setReviews([{ attachmentId, ...r }]);
+    } catch (err) { setError(err); }
+  };
   const drop = async (files: File[]) => {
     setError(null);
     const said: string[] = [];
@@ -491,6 +575,8 @@ function Files({ d, onChange }: { d: QuoteDetail; onChange: (n?: QuoteDetail) =>
         if (dup) repeats.push(`${dup} part${dup === 1 ? '' : 's'} in ${f.name} ${dup === 1 ? 'was' : 'were'} already on the quote and not added again.`);
         if (r.fromEmail) said.push(`the email from ${r.fromEmail.from}${r.fromEmail.read.length ? `, and read from it ${r.fromEmail.read.join('; ')}` : ''}`);
         if (r.attachments.length > 1) said.push(`${r.attachments.length - 1} attachment${r.attachments.length === 2 ? '' : 's'}`);
+        if (r.alreadyAttached.length) repeats.push(`${r.alreadyAttached.join(', ')} ${r.alreadyAttached.length === 1 ? 'was' : 'were'} already on the quote, so ${r.alreadyAttached.length === 1 ? 'it was' : 'they were'} not added again.`);
+        if (r.review.length) setReviews((now) => [...now, ...r.review]);
       } catch (err) { setError(err); }
     }
     setBusy(null);
@@ -508,6 +594,7 @@ function Files({ d, onChange }: { d: QuoteDetail; onChange: (n?: QuoteDetail) =>
                 <span className="ext">{a.fileName.split('.').pop()?.slice(0, 4)}</span>
                 <a href={`/api/files/${a.id}`} target="_blank" rel="noreferrer" title={`${a.fileName} · ${fileSize(a.sizeBytes)} · ${a.uploadedByName} ${ago(a.uploadedAt)}${a.source === 'email' ? ' · from the RFQ email' : ''}`}>{a.fileName}</a>
                 <span className="muted small nowrap">{fileSize(a.sizeBytes)}</span>
+                {canCompare && isPartsList(a.fileName) && <button className="link small nowrap" title={`Compare ${a.fileName} with the parts on the quote`} onClick={() => void compare(a.id)}>Compare</button>}
                 {!closed && <button className="closex x" title="Remove" onClick={async () => { try { await del(`/files/${a.id}`); onChange(); } catch (err) { setError(err); } }}>×</button>}
               </div>
             ))}
@@ -515,6 +602,7 @@ function Files({ d, onChange }: { d: QuoteDetail; onChange: (n?: QuoteDetail) =>
         )}
         {!closed && <DropZone compact busy={busy} onFiles={drop} title="Drop files here" hint="Drawings, models, specs, emails, parts lists" />}
         <ErrorBanner error={error} />
+        {reviews[0] && <PartsReview key={`${reviews[0].attachmentId}-${reviews.length}`} d={d} review={reviews[0]} onDone={(changed) => { setReviews((now) => now.slice(1)); if (changed) onChange(); }} />}
       </div>
     </div>
   );
@@ -664,9 +752,8 @@ export function QuotePage({ id }: { id: number }) {
                 <label className="field">Customer
                   {editableHeader ? (
                     <>
-                      <input list="customers" defaultValue={q.customerName ?? ''} key={`c${q.customerName}`} placeholder="Type a name — new ones are added"
-                        onBlur={(e) => e.target.value.trim() !== (q.customerName ?? '') && save({ customerName: e.target.value })} />
-                      <datalist id="customers">{customerList.map((c) => <option key={c.id} value={c.name} />)}</datalist>
+                      <SuggestInput defaultValue={q.customerName ?? ''} key={`c${q.customerName}`} placeholder="Type a name — new ones are added" aria-label="Customer"
+                        options={customerList.map((c) => c.name)} onCommit={(v) => v.trim() !== (q.customerName ?? '') && save({ customerName: v })} />
                     </>
                   ) : <span className="value">{q.customerName ?? '—'}</span>}
                 </label>

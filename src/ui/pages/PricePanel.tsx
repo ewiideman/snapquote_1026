@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { del, get, post, put } from '../lib/api.ts';
 import { useAsync } from '../lib/useAsync.ts';
 import type { Line, QuoteDetail } from '../lib/types.ts';
-import { canEstimate, ErrorBanner, NumberInput, Panel, useApp } from '../components/ui.tsx';
+import { canEstimate, ErrorBanner, NumberInput, Panel, SuggestInput, useApp } from '../components/ui.tsx';
 import { ago, qty, usd } from '../lib/format.ts';
 import { MoldingCalculator } from './MoldingCalculator.tsx';
 import { MachiningBreakdown, MachiningCalculator } from './MachiningCalculator.tsx';
@@ -196,8 +196,7 @@ function AddVendorQuote({ line, suppliers, onDone }: { line: Line; suppliers: { 
     <div className="card pad stack">
       <b>New vendor quote</b>
       <div className="grid2">
-        <label className="field">Vendor<input list="suppliers" value={f.supplierName} onChange={(e) => setF({ ...f, supplierName: e.target.value })} autoFocus /></label>
-        <datalist id="suppliers">{suppliers.map((s) => <option key={s.id} value={s.name} />)}</datalist>
+        <label className="field">Vendor<SuggestInput value={f.supplierName} onChange={(v) => setF({ ...f, supplierName: v })} options={suppliers.map((s) => s.name)} aria-label="Vendor" autoFocus /></label>
         <label className="field">Their quote number<input value={f.reference} onChange={(e) => setF({ ...f, reference: e.target.value })} /></label>
       </div>
       <table className="grid">
@@ -315,7 +314,7 @@ function MetalsBreakdown({ breaks, warnings }: { breaks: any[]; warnings: string
 }
 
 function MetalsCalculator({ line, onSaved }: { line: Line; onSaved: () => void }) {
-  const catalog = useAsync(() => get<{ catalog: { workCells: WorkCell[]; materialItems: MaterialItem[] } }>('/metals/catalog'), []);
+  const catalog = useAsync(() => get<{ catalog: { workCells: WorkCell[]; materialItems: MaterialItem[] }; sheets: Record<string, { thicknessIn: number; widthIn: number; lengthIn: number }>; nesting: { lengthMarginIn: number; widthMarginIn: number; webIn: number } }>('/metals/catalog'), []);
   // The Production Scheduler's load on each work cell, when the work cell is tied to XA facilities.
   const plant = useAsync(() => get<{ capacity: CapacityRead; workCells: { name: string; mapping: Mapping | null }[] }>('/metals/facilities'), []);
   const loadOf = (cell: string) => {
@@ -349,6 +348,11 @@ function MetalsCalculator({ line, onSaved }: { line: Line; onSaved: () => void }
 
   const set = (change: Partial<CalcState>) => setS({ ...s, ...change });
   const material = materials.find((m) => m.itemNumber === s.itemNumber);
+  // What the sheet's item number already says, and how the blank nests on it, shown beside the fields.
+  const sheet = s.itemNumber ? catalog.data?.sheets[s.itemNumber] : undefined;
+  const nesting = catalog.data?.nesting;
+  const nest = result?.result.breaks[0]?.nesting as { partsPerSheet: number; partsAcross: number; partsDown: number; rotated?: boolean } | undefined;
+  const sheetIn = (n: number) => String(Math.round(n * 100) / 100);
   const shownMaterials = materials.filter((m) => !materialSearch || `${m.itemNumber} ${m.description}`.toLowerCase().includes(materialSearch.toLowerCase())).slice(0, 200);
 
   return (
@@ -367,15 +371,24 @@ function MetalsCalculator({ line, onSaved }: { line: Line; onSaved: () => void }
                 </select>
               </label>
             </div>
-            <div className="row" style={{ gap: 12, alignItems: 'flex-end' }}>
-              <label className="field">Blank length<NumberInput value={s.length} onChange={(v) => set({ length: v })} style={{ width: 110 }} /></label>
-              <label className="field">Blank width<NumberInput value={s.width} onChange={(v) => set({ width: v })} style={{ width: 110 }} /></label>
+            {sheet && nesting && (
+              <p className="hint sheet-facts">
+                <b>{sheetIn(sheet.widthIn)} × {sheetIn(sheet.lengthIn)} in sheet, {sheet.thicknessIn.toFixed(3).replace(/^0/, '')} in thick</b>, read from its item number.
+                {' '}Parts nest in {sheetIn(sheet.widthIn - nesting.widthMarginIn)} × {sheetIn(sheet.lengthIn - nesting.lengthMarginIn)} in of it, {sheetIn(nesting.webIn)} in apart.
+                {material?.priceUsd === null && <span className="warn-text"> This sheet has no price yet: an administrator enters it under Settings.</span>}
+              </p>
+            )}
+            <div className="row wrap" style={{ gap: 12, alignItems: 'flex-end' }}>
+              <label className="field">Part blank length<NumberInput value={s.length} onChange={(v) => set({ length: v })} style={{ width: 110 }} /></label>
+              <label className="field">Part blank width<NumberInput value={s.width} onChange={(v) => set({ width: v })} style={{ width: 110 }} /></label>
               <div className="seg">{(['in', 'mm'] as const).map((u) => <button key={u} className={s.unit === u ? 'on' : ''} onClick={() => {
                 const f = u === s.unit ? 1 : u === 'mm' ? MM : 1 / MM;
                 const r = (v: number | null) => (v === null ? null : Math.round(v * f * 1000) / 1000);
                 set({ unit: u, length: r(s.length), width: r(s.width) });
               }}>{u}</button>)}</div>
+              {nest && <span className="nest-count">{qty(nest.partsPerSheet)} a sheet ({nest.partsAcross} × {nest.partsDown}{nest.rotated ? ', turned' : ''})</span>}
             </div>
+            <p className="hint">The flat size of one part before it is formed, from its drawing: not the sheet. SnapQuote works out how many fit on the sheet.</p>
           </>
         )}
       </div>

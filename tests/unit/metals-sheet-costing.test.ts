@@ -208,3 +208,12 @@ test("a blank that does not nest is costed at the sheet's own $/kg, and the warn
   assert.ok(!r.warnings.some((w) => /priced at \$0/.test(w)));
   assert.ok(r.warnings.some((w) => w.startsWith('A 118.11 x 78.74 in blank (3000 x 2000 mm) does not fit the 96 x 48 in sheet (95.5 x 47 in usable) either way round.')), r.warnings.join(' | '));
 });
+
+test("the sheet's own size typed as the blank is said to be the whole sheet", () => {
+  const whole = priceMetalsLine(lineFromItem({ blank: { lengthMm: 96 * IN, widthMm: 48 * IN, thicknessMm: 1.27 }, material: { itemNumber: ITEM } }), null, CATALOG);
+  assert.ok(whole.warnings.some((w) => /^96 x 48 in is the size of the whole sheet\./.test(w)), whole.warnings.join(' | '));
+  const turned = priceMetalsLine(lineFromItem({ blank: { lengthMm: 48 * IN, widthMm: 96 * IN, thicknessMm: 1.27 }, material: { itemNumber: ITEM } }), null, CATALOG);
+  assert.ok(turned.warnings.some((w) => /is the size of the whole sheet/.test(w)));
+  const big = priceMetalsLine(lineFromItem({ blank: { lengthMm: 3000, widthMm: 2000, thicknessMm: 1.27 }, material: { itemNumber: ITEM } }), null, CATALOG);
+  assert.ok(!big.warnings.some((w) => /whole sheet/.test(w)), 'only for the sheet\'s own size');
+});

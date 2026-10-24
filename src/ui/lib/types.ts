@@ -60,6 +60,16 @@ export interface DropResult {
   linesAdded: { fileName: string; sheets: string[]; lineIds: number[]; alreadyOnQuote: number }[];
   notRead: { fileName: string; problem: string }[];
   fromEmail: { subject: string; from: string; date: string | null; customerName: string | null; read: string[] } | null;
+  alreadyAttached: string[];
+  review: { attachmentId: number; fileName: string; comparison: PartsComparison }[];
+}
+
+export interface PartRow { partNumber: string; revision: string; description: string; qtyPer: number; notes?: string }
+export interface PartsComparison {
+  added: PartRow[];
+  removed: (PartRow & { id: number })[];
+  changed: { line: PartRow & { id: number }; to: PartRow; what: ('revision' | 'quantity' | 'description')[] }[];
+  same: number;
 }
 
 export const STAGE_NAMES: Record<Stage, string> = {

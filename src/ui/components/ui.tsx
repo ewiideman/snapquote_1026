@@ -161,6 +161,51 @@ export function GrowingText({ value, onChange, onBlur, className = 'bare', place
   );
 }
 
+/**
+ * A text field with suggestions as you type, drawn by SnapQuote rather than the browser (Safari draws
+ * its own list in the computer's colors, not the page's, and it came out white on white). Typing
+ * anything else is allowed. Arrow keys move through the list, Enter takes one, Escape closes it.
+ * `onCommit` runs when the field is left, as a plain field's blur would.
+ */
+export function SuggestInput({ value, defaultValue, onChange, onCommit, options, placeholder, autoFocus, ...rest }: {
+  value?: string; defaultValue?: string; onChange?: (v: string) => void; onCommit?: (v: string) => void; options: readonly string[];
+  placeholder?: string; autoFocus?: boolean; 'aria-label'?: string;
+}) {
+  const [text, setText] = useState(value ?? defaultValue ?? '');
+  useEffect(() => { if (value !== undefined) setText(value); }, [value]);
+  const [open, setOpen] = useState(false);
+  const [active, setActive] = useState(-1);
+  const id = useId();
+  const q = text.trim().toLowerCase();
+  const matches = options.filter((o) => !q || o.toLowerCase().includes(q)).slice(0, 8);
+  const shown = open && matches.length > 0 && !(matches.length === 1 && matches[0] === text);
+  const set = (v: string) => { setText(v); onChange?.(v); };
+  const pick = (v: string) => { set(v); setOpen(false); setActive(-1); };
+  return (
+    <div className="suggest">
+      <input value={text} placeholder={placeholder} autoFocus={autoFocus} aria-label={rest['aria-label']} autoComplete="off"
+        role="combobox" aria-autocomplete="list" aria-expanded={shown} aria-controls={id} aria-activedescendant={shown && active >= 0 ? `${id}-${active}` : undefined}
+        onChange={(e) => { set(e.target.value); setOpen(true); setActive(-1); }}
+        onFocus={() => setOpen(true)}
+        onBlur={() => { setOpen(false); onCommit?.(text); }}
+        onKeyDown={(e) => {
+          if (e.key === 'ArrowDown') { e.preventDefault(); setOpen(true); setActive((i) => Math.min(i + 1, matches.length - 1)); }
+          else if (e.key === 'ArrowUp') { e.preventDefault(); setActive((i) => Math.max(i - 1, 0)); }
+          else if (e.key === 'Enter' && shown && active >= 0 && matches[active] !== undefined) { e.preventDefault(); pick(matches[active] as string); }
+          else if (e.key === 'Escape' && shown) { e.preventDefault(); e.stopPropagation(); setOpen(false); }
+        }} />
+      {shown && (
+        <ul className="popover suggest-list" id={id} role="listbox">
+          {matches.map((o, i) => (
+            <li key={o} id={`${id}-${i}`} role="option" aria-selected={i === active} className={i === active ? 'on' : ''}
+              onMouseDown={(e) => e.preventDefault()} onMouseEnter={() => setActive(i)} onClick={() => pick(o)}>{o}</li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 export function ErrorBanner({ error }: { error: unknown }) {
   if (!error) return null;
   return <div className="banner error" role="alert">{message(error)}</div>;
@@ -280,12 +325,12 @@ export function Panel({ title, sub, onClose, children, footer }: { title: ReactN
   );
 }
 
-export function Dialog({ title, onClose, children, footer }: { title: ReactNode; onClose: () => void; children: ReactNode; footer: ReactNode }) {
+export function Dialog({ title, onClose, children, footer, wide }: { title: ReactNode; onClose: () => void; children: ReactNode; footer: ReactNode; wide?: boolean }) {
   useEscape(onClose);
   return (
     <>
       <div className="scrim" onClick={onClose} />
-      <div className="dialog" role="dialog" aria-modal="true">
+      <div className={`dialog${wide ? ' wide' : ''}`} role="dialog" aria-modal="true" aria-label={typeof title === 'string' ? title : undefined}>
         <header><h2>{title}</h2></header>
         <div className="body">{children}</div>
         <footer>{footer}</footer>

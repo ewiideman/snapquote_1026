@@ -571,6 +571,58 @@ test('an RFQ email from a new customer fills in the customer from its signature,
   assert.deepEqual(d.q.quote.quantities, [100, 300, 600]);
 });
 
+test('a newer parts list is reviewed before it changes the parts; the same file twice is attached once', async () => {
+  const jon = await session('jon.whitney');
+  const metals = await session('metals.est');
+  const qid = (await jon('POST', '/quotes', {})).body.id as number;
+  await jon('PATCH', `/quotes/${qid}`, { customerName: 'Stryker', quantities: [10] });
+  const drop = async (name: string, csv: string) => {
+    const r = await jon('POST', `/quotes/${qid}/files?name=${encodeURIComponent(name)}`, undefined, Buffer.from(csv));
+    assert.equal(r.status, 201, JSON.stringify(r.body));
+    return r.body;
+  };
+  const parts = async () => (await jon('GET', `/quotes/${qid}`)).body.lines.map((l: any) => `${l.partNumber} ${l.revision} x${l.qtyPer}`);
+  const v1 = 'Part Number,Rev,Description,Qty\nA-100,A,Bracket,2\nA-200,B,Cover,1\nA-300,A,Shaft,1\n';
+  assert.equal((await drop('bom-v1.csv', v1)).linesAdded[0].lineIds.length, 3);
+
+  // The same file again: not attached, not read.
+  const again = await drop('bom-v1 (copy).csv', v1);
+  assert.deepEqual(again.alreadyAttached, ['bom-v1 (copy).csv']);
+  assert.equal(again.attachments.length, 0);
+  assert.equal((await jon('GET', `/quotes/${qid}`)).body.attachments.length, 1);
+
+  // A newer list: A-100 to 3 per assembly, A-200 to rev C, A-300 gone, A-400 new. Nothing changes until chosen.
+  const v2 = 'Part Number,Rev,Description,Qty\nA-100,A,Bracket,3\nA-200,C,Cover,1\nA-400,A,Gasket,2\n';
+  const r = await drop('bom-v2.csv', v2);
+  assert.equal(r.linesAdded.length, 0);
+  assert.equal(r.review.length, 1);
+  const c = r.review[0].comparison;
+  assert.deepEqual(c.added.map((p: any) => p.partNumber), ['A-400']);
+  assert.deepEqual(c.removed.map((p: any) => p.partNumber), ['A-300']);
+  assert.deepEqual(c.changed.map((x: any) => [x.line.partNumber, x.what]), [['A-100', ['quantity']], ['A-200', ['revision']]]);
+  assert.deepEqual(await parts(), ['A-100 A x2', 'A-200 B x1', 'A-300 A x1']);
+  const fileId = r.review[0].attachmentId;
+  assert.deepEqual((await jon('GET', `/quotes/${qid}/files/${fileId}/parts`)).body.comparison, c, 'the same comparison when opened again');
+  assert.equal((await metals('POST', `/quotes/${qid}/files/${fileId}/parts`, { mode: 'match' })).status, 403, 'estimators do not change the parts');
+
+  // Only the new parts, then everything.
+  assert.equal((await jon('POST', `/quotes/${qid}/files/${fileId}/parts`, { mode: 'add' })).status, 200);
+  assert.deepEqual(await parts(), ['A-100 A x2', 'A-200 B x1', 'A-300 A x1', 'A-400 A x2']);
+  assert.equal((await jon('POST', `/quotes/${qid}/files/${fileId}/parts`, { mode: 'match' })).status, 200);
+  assert.deepEqual(await parts(), ['A-100 A x3', 'A-200 C x1', 'A-400 A x2']);
+  assert.equal((await db.query("SELECT count(*)::int AS n FROM quote.line WHERE quote_id = $1 AND part_number = 'A-300' AND removed_at IS NOT NULL", [qid]))[0]?.n, 1, 'removed, not deleted');
+  const d = (await jon('GET', `/quotes/${qid}`)).body;
+  assert.ok(d.messages.some((m: any) => /^Parts brought up to bom-v2\.csv: 0 parts added, 1 no longer listed and removed, 2 parts changed\./.test(m.body)));
+  assert.equal((await db.query("SELECT count(*)::int AS n FROM app.audit_event WHERE action = 'quote.parts_from_file' AND entity_id = $1", [String(qid)]))[0]?.n, 2);
+  assert.equal((await jon('GET', `/quotes/${qid}/files/${fileId}/parts`)).body.comparison.same, 3, 'now the same as the list');
+
+  // A list with no part in common (another assembly's) is added as it is.
+  const other = await drop('fixture.csv', 'Part Number,Rev,Description,Qty\nF-1,A,Fixture plate,1\n');
+  assert.equal(other.review.length, 0);
+  assert.equal(other.linesAdded[0].lineIds.length, 1);
+  assert.equal((await jon('POST', `/quotes/${qid}/files/${d.attachments[0].id}/parts`, { mode: 'sideways' })).status, 400);
+});
+
 test('signed out, nothing but the session is reachable', async () => {
   assert.equal((await fetch(`${base}/board`)).status, 401);
   assert.equal((await fetch(`${base}/files/1`)).status, 401);

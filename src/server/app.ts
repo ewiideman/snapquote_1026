@@ -14,7 +14,7 @@ import {
   answerRequest, assignRequest, board, closeQuote, createQuote, deletedQuotes, deleteQuote, restoreQuote, customers, LOST_REASONS, markSent, postMessage, queue, quoteDetail, reviseQuote, saveEstimate, saveLines,
   sendToEstimating, setAdjustment, setOverride, updateHeader,
 } from '../persistence/quotes.ts';
-import { attachmentFile, dropFile, MAX_FILE_BYTES, readStored, removeAttachment } from '../persistence/files.ts';
+import { applyPartsFile, attachmentFile, comparePartsFile, dropFile, MAX_FILE_BYTES, readStored, removeAttachment } from '../persistence/files.ts';
 import { addVendorQuote, priceFromVendor, removeVendorQuote, suppliers, vendorQuotes } from '../persistence/procurement.ts';
 import { quoteTerms, referenceRows, setReference } from '../persistence/reference.ts';
 import { markups, setMarkup } from '../persistence/markups.ts';
@@ -318,6 +318,13 @@ export function createApp(db: Database, options: AppOptions): express.Express {
     if (!name) throw new HttpError(400, 'name is required');
     if (!Buffer.isBuffer(req.body)) throw new HttpError(400, 'Send the file as the body.');
     res.status(201).json(await dropFile(db, me(res), id(req), { fileName: name, bytes: req.body }, storageDir));
+  });
+  // A parts list on the quote against its parts now, and bringing the parts up to it.
+  api.get('/quotes/:id/files/:file/parts', async (req, res) => {
+    res.json(await comparePartsFile(db, id(req), Number(req.params['file']), storageDir));
+  });
+  api.post('/quotes/:id/files/:file/parts', async (req, res) => {
+    res.json({ comparison: await applyPartsFile(db, me(res), id(req), Number(req.params['file']), body(req)['mode'], storageDir) });
   });
   api.get('/files/:id', async (req, res) => {
     const f = await attachmentFile(db, id(req));

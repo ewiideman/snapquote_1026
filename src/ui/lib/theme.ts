@@ -21,9 +21,6 @@ const systemDark = () => typeof matchMedia === 'function' && matchMedia('(prefer
 export function applyTheme(choice: ThemeChoice): void {
   const theme = choice === 'dark' || (choice === 'system' && systemDark()) ? 'dark' : 'light';
   document.documentElement.dataset['theme'] = theme;
-  // Native pickers and suggestion lists follow the color-scheme tag: one theme, never "light dark",
-  // or Safari draws a dark list's text on a light page.
-  document.querySelector('meta[name="color-scheme"]')?.setAttribute('content', theme);
 }
 
 export function saveTheme(choice: ThemeChoice): void {

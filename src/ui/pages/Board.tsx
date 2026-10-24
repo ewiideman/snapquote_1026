@@ -29,6 +29,8 @@ export async function startQuote(files: File[], toast: (t: string) => void): Pro
       lines += r.linesAdded.reduce((s, l) => s + l.lineIds.length, 0);
       repeats += r.linesAdded.reduce((s, l) => s + l.alreadyOnQuote, 0);
       if (r.fromEmail) { from = r.fromEmail.from; read.push(...r.fromEmail.read); }
+      unread.push(...r.alreadyAttached.map((n) => `${n} (already attached)`));
+      for (const x of r.review) unread.push(`${x.fileName} (shares parts with another list: open Compare beside it under Files)`);
       unread.push(...r.notRead.map((n) => n.fileName));
     } catch (err) {
       unread.push(`${f.name} (${message(err)})`);

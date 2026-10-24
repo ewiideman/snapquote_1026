@@ -442,6 +442,12 @@ export function priceMetalsLine(
       const inch = (mm: number) => Math.round((mm / MM_PER_IN) * 100) / 100;
       const usableL = inch(mat.sheet.lengthMm ?? 0) - nestingParams.lengthMarginIn;
       const usableW = inch(mat.sheet.widthMm ?? 0) - nestingParams.widthMarginIn;
+      // The sheet's own size typed as the blank: say so, as the likely mix-up (the sheet is already known).
+      const bl = inch(blank.lengthMm ?? 0), bw = inch(blank.widthMm ?? 0), sl = inch(mat.sheet.lengthMm ?? 0), sw = inch(mat.sheet.widthMm ?? 0);
+      const near = (a: number, b: number) => Math.abs(a - b) < 0.5;
+      if ((near(bl, sl) && near(bw, sw)) || (near(bl, sw) && near(bw, sl))) {
+        warnings.push(`${bl} x ${bw} in is the size of the whole sheet. The blank is one part's flat size, from its drawing; the sheet's size is already taken from its item number.`);
+      }
       warnings.push(
         `A ${inch(blank.lengthMm ?? 0)} x ${inch(blank.widthMm ?? 0)} in blank (${Math.round(blank.lengthMm ?? 0)} x ${Math.round(blank.widthMm ?? 0)} mm) ` +
           `does not fit the ${inch(mat.sheet.lengthMm ?? 0)} x ${inch(mat.sheet.widthMm ?? 0)} in sheet (${usableL} x ${usableW} in usable) either way round. ` +

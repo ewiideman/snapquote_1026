@@ -7,7 +7,6 @@
    (data-theme) before the first paint by the script in index.html. */
 
 :root {
-  color-scheme: light;
   /* surfaces, back to front */
   --bg: #f3f5f8;            /* the page: cool neutral */
   --nav: #eaedf2;           /* the sidebar */
@@ -253,6 +252,12 @@ svg { flex: none; }
 .theme-choices button:hover { background: var(--hover); }
 .theme-choices button[aria-pressed="true"] { font-weight: 600; }
 .theme-choices svg { width: 16px; height: 16px; color: var(--muted); }
+/* Suggestions under a field (SuggestInput): the app's own list, in the page's colors. */
+.suggest { position: relative; width: 100%; min-width: 0; }
+.suggest > input { width: 100%; }
+.suggest-list { top: calc(100% + 4px); left: 0; right: 0; min-width: 0; max-height: 280px; overflow-y: auto; margin: 0; list-style: none; }
+.suggest-list li { padding: 7px 10px; border-radius: var(--r-sm); color: var(--ink); font-size: var(--text); font-weight: 400; line-height: 1.35; cursor: pointer; overflow-wrap: anywhere; }
+.suggest-list li.on { background: var(--accent-soft); color: var(--accent-ink); }
 .theme-choices .tick { color: var(--accent-ink); }
 .menu-dot { position: absolute; top: 6px; right: 6px; width: 8px; height: 8px; border-radius: 50%; background: var(--attn); box-shadow: 0 0 0 2px var(--nav); }
 .side-scrim { display: none; }
@@ -627,6 +632,16 @@ table.grid .sub { font-size: 12px; color: var(--muted); }
 .panel > .body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 18px 22px; display: flex; flex-direction: column; gap: 14px; }
 .panel > footer { display: flex; align-items: center; gap: 10px; padding: 14px 22px; background: var(--surface); border-top: 1px solid var(--line); }
 .dialog { position: fixed; top: 12vh; left: 50%; transform: translateX(-50%); width: min(520px, 94vw); background: var(--raised); border: 1px solid var(--card-line); border-radius: var(--r-xl); z-index: 41; box-shadow: var(--shadow); }
+.dialog.wide { width: min(720px, 94vw); }
+.dialog > .body { max-height: calc(76vh - 120px); overflow-y: auto; }
+/* Comparing a parts list with the quote's parts. */
+.compare { display: flex; flex-direction: column; gap: 14px; }
+.compare h3 { margin-bottom: 6px; color: var(--ink); }
+.compare ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: var(--r); }
+.compare li { display: grid; grid-template-columns: minmax(140px, 34%) 1fr; gap: 12px; padding: 7px 10px; font-size: var(--text-sm); }
+.compare li + li { border-top: 1px solid var(--line); }
+.compare li > span:last-child { color: var(--ink-2); overflow-wrap: anywhere; }
+.dialog > footer { flex-wrap: wrap; }
 .dialog > header { padding: 18px 22px 0; }
 .dialog > .body { padding: 14px 22px; display: flex; flex-direction: column; gap: 12px; }
 .dialog > footer { display: flex; justify-content: flex-end; gap: 8px; padding: 14px 22px 18px; }
@@ -696,6 +711,10 @@ table.grid .sub { font-size: 12px; color: var(--muted); }
   .board-wrap::before, .board-wrap::after, .board-nudge { display: none; }
 }
 
+/* The Metals calculator: what the chosen sheet already gives, and how many blanks fit on it. */
+.sheet-facts b { color: var(--ink); font-weight: 600; }
+.warn-text { color: var(--soon); font-weight: 500; }
+.nest-count { align-self: center; padding-top: 22px; color: var(--done); font-weight: 600; font-size: var(--text-sm); }
 .save-status { font-size: 12px; color: var(--muted); }
 .save-status.ok { color: var(--done); }
 .save-status.bad { color: var(--late); font-weight: 600; }

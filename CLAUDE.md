@@ -16,6 +16,15 @@ Read README.md first. This file is the rules and where things stand.
   punctuation and Inc/LLC before one is added, and the domain kept on it; the quantities and the
   customer's date only from lines the customer labeled ("Quantities:", "Quote due:"), never the annual
   usage. Only empty fields on a draft are filled; what was read is said in the toast and the conversation.
+- State (2026-10-24, newer parts lists): **a dropped parts list that would remove or change a part on
+  the quote changes nothing until reviewed** (Eric Wiideman, Oct 24). `src/quoting/bom-compare.ts`
+  (matched by part number, same revision first, so a new revision is the part changed; changes are
+  revision, quantity per, description); a list that only adds parts, or shares none, is added as before.
+  The review: update the parts to match, add only the new ones, or keep them (`applyPartsFile`,
+  through saveLines: removed parts are marked removed, departments get changed parts back); "Compare"
+  beside each parts list reopens it. A file already on the quote (same contents) is not attached or
+  read again. Suggestions under a field are SnapQuote's own list (`SuggestInput`), not a datalist:
+  Safari drew the datalist white on white.
 - **Linking SnapQuote to the Production Scheduler: SnapQuote's side only** (Eric Wiideman, Oct 22,
   2026, lifting the Oct 10 hold for SnapQuote's side): SnapQuote's half may be built; the scheduler's
   repository stays separate, and `MACK_EXCHANGE_DIR` stays unset on Mack's server until he says.

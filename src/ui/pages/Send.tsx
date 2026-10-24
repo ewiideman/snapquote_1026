@@ -7,7 +7,7 @@ import type { Line, QuoteDetail, SheetCell } from '../lib/types.ts';
 import { STAGE_NAMES } from '../lib/types.ts';
 import { canSell, DeptChip, Dialog, ErrorBanner, NumberInput, useApp } from '../components/ui.tsx';
 import { qty, shortDate, usd } from '../lib/format.ts';
-import { CloseDialog } from './Quote.tsx';
+import { CloseDialog, departmentsToMarkDone, markDepartmentsDone, markDoneLabel } from './Quote.tsx';
 import { caughtUpWords, loadTone, pct, type CapacityRead, type WorkCellCapacity } from '../lib/capacity.ts';
 import { ago } from '../lib/format.ts';
 import { PricePanel } from './PricePanel.tsx';
@@ -174,6 +174,7 @@ export function SendPage({ id }: { id: number }) {
   const [viewing, setViewing] = useState<Line | null>(null);
   const [closing, setClosing] = useState<null | 'won' | 'lost' | 'no_bid'>(null);
   const [confirmSent, setConfirmSent] = useState(false);
+  const [marking, setMarking] = useState(false);
   const [adjusting, setAdjusting] = useState(false);
   const [actionError, setActionError] = useState<unknown>(null);
   useEffect(() => { if (data) setD(data); }, [data]);
@@ -186,6 +187,15 @@ export function SendPage({ id }: { id: number }) {
   const lines = d.lines.map((l, i) => ({ line: l, sheet: d.sheet.lines[i] }));
   const assembly = d.sheet.assembly;
   const waiting = d.requests.filter((r) => r.status !== 'answered');
+  const names = (rs: typeof waiting) => rs.map((r) => app.deptName(r.department)).join(', ') || 'the departments';
+  // A manager or administrator who priced a department's parts can mark it done, as on the quote page.
+  const markable = departmentsToMarkDone(d, app.account);
+  const markDone = async () => {
+    setMarking(true);
+    setActionError(null);
+    try { await markDepartmentsDone(d, markable); app.refreshCounts(); reload(); } catch (err) { setActionError(err); }
+    setMarking(false);
+  };
   const overrides = d.overrides.length;
   const run = async (fn: () => Promise<QuoteDetail>) => {
     setActionError(null);
@@ -204,11 +214,17 @@ export function SendPage({ id }: { id: number }) {
         </div>
       </div>
 
-      {waiting.length > 0 && q.status === 'estimating' && (
-        <div className="banner warn" style={{ marginBottom: 14 }}>
-          Still waiting on {waiting.map((r) => app.deptName(r.department)).join(', ')}. Prices below are what has come in so far.
+      {waiting.length > 0 && q.status === 'estimating' && (d.sheet.complete ? (
+        // Every part has a price: nothing is missing; some departments have only not said they are done.
+        <div className="banner info spread" style={{ marginBottom: 14, flexWrap: 'wrap' }}>
+          <span><b>Every part has a price.</b> {names(waiting)} {waiting.length === 1 ? "hasn't" : "haven't"} marked {waiting.length === 1 ? 'its' : 'their'} prices done, so a price could still change. You can send it now.</span>
+          {markable.length > 0 && <button className="btn small" disabled={marking} onClick={() => void markDone()}>{markDoneLabel(d, app.account, markable, app.deptName)}</button>}
         </div>
-      )}
+      ) : (
+        <div className="banner warn" style={{ marginBottom: 14 }}>
+          Still waiting on prices from {names(waiting.filter((r) => d.lines.some((l) => l.department === r.department && d.sheet.missing.some((m) => m.lineId === l.id))))}: {d.sheet.missing.length} part{d.sheet.missing.length === 1 ? '' : 's'} without a price. Prices below are what has come in so far.
+        </div>
+      ))}
       <ErrorBanner error={actionError} />
 
       <div className="totals" style={{ marginBottom: 16 }}>

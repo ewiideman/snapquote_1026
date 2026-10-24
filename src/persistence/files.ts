@@ -12,7 +12,8 @@ import { audit, HttpError, sha256 } from './util.ts';
 import { isEmail, readEmail } from '../lib/email.ts';
 import { isSpreadsheet, readSpreadsheet } from '../lib/spreadsheet.ts';
 import { proposeLines } from '../quoting/bom.ts';
-import { customerByName, customerForEmail, emailDomain } from './quotes.ts';
+import { customerByName, customerForEmail, emailDomain, saveLines } from './quotes.ts';
+import { compareParts, worthReviewing, type PartsComparison, type QuotePart } from '../quoting/bom-compare.ts';
 import { companyFromEmail, dueDateFromEmail, quantitiesFromEmail } from '../quoting/rfq-facts.ts';
 import { looseKey, nameKey } from '../quoting/directory.ts';
 
@@ -31,6 +32,13 @@ export interface DropResult {
     /** What the email filled in that was empty, in words: "the customer, Cobalt Ridge Medical Systems, LLC, from its signature". */
     read: string[];
   } | null;
+  /** Files the quote already had, byte for byte: not attached or read again. */
+  alreadyAttached: string[];
+  /**
+   * Parts lists that share parts with the quote and would remove or change one: nothing was changed; business
+   * development reviews each and brings the parts up to it, adds only its new parts, or keeps them.
+   */
+  review: { attachmentId: number; fileName: string; comparison: PartsComparison }[];
 }
 
 const MIME: Record<string, string> = {
@@ -116,29 +124,43 @@ async function customerFromSignature(tx: Queryable, text: string, fromAddress: s
 export async function dropFile(db: Database, actor: Account, quoteId: number, file: { fileName: string; contentType?: string; bytes: Buffer }, storageDir: string): Promise<DropResult> {
   if (file.bytes.length === 0) throw new HttpError(400, 'The file is empty.');
   if (file.bytes.length > MAX_FILE_BYTES) throw new HttpError(413, 'Files are limited to 100 MB.');
-  const result: DropResult = { attachments: [], linesAdded: [], notRead: [], fromEmail: null };
+  const result: DropResult = { attachments: [], linesAdded: [], notRead: [], fromEmail: null, alreadyAttached: [], review: [] };
   // Read before the transaction: parsing a large file should not hold the quote locked.
   const email = isEmail(file.fileName) ? await readEmail(file.fileName, file.bytes).catch(() => null) : null;
   const spreadsheets: { fileName: string; contentType: string; bytes: Buffer }[] = [];
   if (isSpreadsheet(file.fileName)) spreadsheets.push({ fileName: file.fileName, contentType: file.contentType ?? '', bytes: file.bytes });
   for (const a of email?.attachments ?? []) if (isSpreadsheet(a.fileName)) spreadsheets.push(a);
   const proposals = await Promise.all(spreadsheets.map(async (s) => {
+    const hash = sha256(s.bytes);
     try {
-      return { fileName: s.fileName, ...proposeLines(await readSpreadsheet(s.fileName, s.bytes)) };
+      return { fileName: s.fileName, hash, ...proposeLines(await readSpreadsheet(s.fileName, s.bytes)) };
     } catch {
-      return { fileName: s.fileName, sheets: [], lines: [], problem: 'The spreadsheet could not be read.' };
+      return { fileName: s.fileName, hash, sheets: [], lines: [], problem: 'The spreadsheet could not be read.' };
     }
   }));
+  // Each file as it is attached, by its contents: a file the quote already has is not attached or read twice.
+  const attachedAs = new Map<string, number>();
   await db.transaction(async (tx) => {
-    const q = (await tx.query<{ status: string; title: string; contact_email: string | null; customer_id: number | null; rfq_received_on: string | null; deleted_at: string | null; quantities: number[]; customer_due_on: string | null }>(
-      'SELECT deleted_at, status, title, contact_email, customer_id, rfq_received_on, quantities, customer_due_on FROM quote.quote WHERE id = $1 FOR UPDATE', [quoteId]))[0];
+    const q = (await tx.query<{ status: string; title: string; contact_email: string | null; customer_id: number | null; rfq_received_on: string | null; deleted_at: string | null; quantities: number[]; customer_due_on: string | null; source_email: { subject: string; from: string } | null }>(
+      'SELECT deleted_at, status, title, contact_email, customer_id, rfq_received_on, quantities, customer_due_on, source_email FROM quote.quote WHERE id = $1 FOR UPDATE', [quoteId]))[0];
     if (!q) throw new HttpError(404, 'No such quote.');
     if (q.deleted_at) throw new HttpError(409, 'This quote was deleted. Restore it to change it.');
     if (q.status === 'won' || q.status === 'lost' || q.status === 'no_bid') throw new HttpError(409, 'This quote is closed.');
     const canAddParts = actor.role !== 'estimator' && (q.status === 'draft' || q.status === 'estimating');
-    result.attachments.push({ id: await insertAttachment(tx, actor, quoteId, { fileName: file.fileName, contentType: file.contentType ?? '', bytes: file.bytes }, 'upload', storageDir), fileName: safeName(file.fileName) });
+    const had = async (bytes: Buffer) => (await tx.query('SELECT 1 FROM quote.attachment WHERE quote_id = $1 AND sha256 = $2 AND removed_at IS NULL', [quoteId, sha256(bytes)])).length > 0;
+    // The same file again (dropped twice, or both attached to the email and dropped on its own): nothing to do.
+    if (await had(file.bytes)) { result.alreadyAttached.push(safeName(file.fileName)); return; }
+    const attach = async (f: { fileName: string; contentType: string; bytes: Buffer }, source: 'upload' | 'email') => {
+      const id = await insertAttachment(tx, actor, quoteId, f, source, storageDir);
+      attachedAs.set(sha256(f.bytes), id);
+      result.attachments.push({ id, fileName: safeName(f.fileName) });
+    };
+    await attach({ fileName: file.fileName, contentType: file.contentType ?? '', bytes: file.bytes }, 'upload');
     if (email) {
-      for (const a of email.attachments) result.attachments.push({ id: await insertAttachment(tx, actor, quoteId, a, 'email', storageDir), fileName: safeName(a.fileName) });
+      for (const a of email.attachments) {
+        if (attachedAs.has(sha256(a.bytes)) || await had(a.bytes)) { result.alreadyAttached.push(safeName(a.fileName)); continue; }
+        await attach(a, 'email');
+      }
       const from = email.fromName && email.fromAddress ? `${email.fromName} <${email.fromAddress}>` : email.fromAddress || email.fromName;
       const read: string[] = [];
       let customer = q.customer_id ? null : await customerForEmail(tx, email.fromAddress);
@@ -159,7 +181,9 @@ export async function dropFile(db: Database, actor: Account, quoteId: number, fi
                 quantities = CASE WHEN $8::int[] IS NULL THEN quantities ELSE $8::int[] END, customer_due_on = coalesce(customer_due_on, $9::date), updated_at = now() WHERE id = $1`,
         [quoteId, JSON.stringify({ subject: email.subject, from, date: email.date }), email.subject.replace(/^((re|fw|fwd|rfq|request for quot(e|ation))\s*:\s*)+/i, '').slice(0, 300),
           email.fromName.slice(0, 200), email.fromAddress.slice(0, 200), email.date ? email.date.slice(0, 10) : null, customer?.id ?? null, quantities, dueOn]);
-      if (email.text.trim()) await tx.query("INSERT INTO quote.message (quote_id, author_id, kind, body) VALUES ($1, $2, 'note', $3)", [quoteId, actor.id, `From the RFQ email (${from}):\n\n${email.text.trim().slice(0, 8000)}`]);
+      // The same email again (its .msg after its .eml) is not put in the conversation twice.
+      const sameEmail = !!q.source_email && q.source_email.subject === email.subject && q.source_email.from === from;
+      if (email.text.trim() && !sameEmail) await tx.query("INSERT INTO quote.message (quote_id, author_id, kind, body) VALUES ($1, $2, 'note', $3)", [quoteId, actor.id, `From the RFQ email (${from}):\n\n${email.text.trim().slice(0, 8000)}`]);
       // Said in the conversation, so anyone can see what was read and check it against the email.
       if (read.length) await tx.query("INSERT INTO quote.message (quote_id, author_id, kind, body) VALUES ($1, $2, 'event', $3)", [quoteId, actor.id, `Read from the email: ${read.join('; ')}. Check them against the email below.`]);
       result.fromEmail = { subject: email.subject, from, date: email.date, customerName: customer?.name ?? null, read };
@@ -167,6 +191,8 @@ export async function dropFile(db: Database, actor: Account, quoteId: number, fi
       result.notRead.push({ fileName: file.fileName, problem: 'The email could not be read; it is attached as it is.' });
     }
     for (const p of proposals) {
+      const attachmentId = attachedAs.get(p.hash);
+      if (attachmentId === undefined) continue; // already on the quote, and read when it came
       if (!p.lines.length) {
         result.notRead.push({ fileName: p.fileName, problem: p.problem ?? 'No parts found.' });
         continue;
@@ -175,6 +201,9 @@ export async function dropFile(db: Database, actor: Account, quoteId: number, fi
         result.notRead.push({ fileName: p.fileName, problem: 'Attached; parts are only added from a file while the quote is being put together.' });
         continue;
       }
+      // A newer copy of the quote's parts list changes nothing by itself: it is reviewed first.
+      const comparison = compareParts(await quoteParts(tx, quoteId), p.lines);
+      if (worthReviewing(comparison)) { result.review.push({ attachmentId, fileName: p.fileName, comparison }); continue; }
       const added = await addLines(tx, quoteId, p.lines);
       result.linesAdded.push({ fileName: p.fileName, sheets: p.sheets.map((s) => s.name), lineIds: added.ids, alreadyOnQuote: added.skipped });
     }
@@ -185,6 +214,65 @@ export async function dropFile(db: Database, actor: Account, quoteId: number, fi
     await audit(tx, actor.id, 'quote.file_dropped', 'quote', quoteId, { fileName: file.fileName, attachments: result.attachments.length, lines: result.linesAdded.reduce((s, l) => s + l.lineIds.length, 0) });
   });
   return result;
+}
+
+type LineRecord = { id: number; part_number: string; revision: string; description: string; qty_per: string; quantities: string[]; department: string | null; notes: string };
+async function lineRecords(db: Queryable, quoteId: number): Promise<LineRecord[]> {
+  return db.query<LineRecord>('SELECT id, part_number, revision, description, qty_per, quantities, department, notes FROM quote.line WHERE quote_id = $1 AND removed_at IS NULL ORDER BY position, id', [quoteId]);
+}
+async function quoteParts(db: Queryable, quoteId: number): Promise<QuotePart[]> {
+  return (await lineRecords(db, quoteId)).map((l) => ({ id: l.id, partNumber: l.part_number, revision: l.revision, description: l.description, qtyPer: Number(l.qty_per) }));
+}
+
+/** A parts list attached to the quote, read again from the stored file. */
+async function storedPartsList(db: Queryable, quoteId: number, attachmentId: number, storageDir: string): Promise<{ fileName: string; lines: ReturnType<typeof proposeLines>['lines'] }> {
+  const a = (await db.query<{ file_name: string; sha256: string }>('SELECT file_name, sha256 FROM quote.attachment WHERE id = $1 AND quote_id = $2 AND removed_at IS NULL', [attachmentId, quoteId]))[0];
+  if (!a) throw new HttpError(404, 'That file is not on this quote.');
+  if (!isSpreadsheet(a.file_name)) throw new HttpError(400, `${a.file_name} is not a parts list.`);
+  const r = proposeLines(await readSpreadsheet(a.file_name, readStored(storageDir, a.sha256)));
+  if (!r.lines.length) throw new HttpError(400, r.problem ?? `No parts were found in ${a.file_name}.`);
+  return { fileName: a.file_name, lines: r.lines };
+}
+
+/** How a parts list on the quote compares with the quote's parts now. */
+export async function comparePartsFile(db: Queryable, quoteId: number, attachmentId: number, storageDir: string): Promise<{ fileName: string; comparison: PartsComparison }> {
+  const list = await storedPartsList(db, quoteId, attachmentId, storageDir);
+  return { fileName: list.fileName, comparison: compareParts(await quoteParts(db, quoteId), list.lines) };
+}
+
+/**
+ * Brings the quote's parts up to a parts list on it ('match': its new parts added, the parts it no
+ * longer has removed, revisions, quantities per and descriptions as it has them), or adds only its new
+ * parts ('add'). Through saveLines, so nothing is deleted (removed parts are marked removed), and a
+ * department pricing a changed part has it handed back. Said in the conversation.
+ */
+export async function applyPartsFile(db: Database, actor: Account, quoteId: number, attachmentId: number, mode: unknown, storageDir: string): Promise<PartsComparison> {
+  if (mode !== 'match' && mode !== 'add') throw new HttpError(400, "mode is 'match' or 'add'");
+  const list = await storedPartsList(db, quoteId, attachmentId, storageDir);
+  const lines = await lineRecords(db, quoteId);
+  const comparison = compareParts(lines.map((l) => ({ id: l.id, partNumber: l.part_number, revision: l.revision, description: l.description, qtyPer: Number(l.qty_per) })), list.lines);
+  const removed = new Set(mode === 'match' ? comparison.removed.map((l) => l.id) : []);
+  const changes = new Map(mode === 'match' ? comparison.changed.map((c) => [c.line.id, c.to]) : []);
+  const input = [
+    ...lines.filter((l) => !removed.has(l.id)).map((l) => {
+      const to = changes.get(l.id);
+      return {
+        id: l.id, partNumber: l.part_number, revision: to ? to.revision : l.revision, description: to && to.description.trim() ? to.description : l.description,
+        qtyPer: to ? to.qtyPer : Number(l.qty_per), quantities: l.quantities.map(Number), department: l.department, notes: l.notes,
+      };
+    }),
+    ...comparison.added.map((p) => ({ partNumber: p.partNumber, revision: p.revision, description: p.description, qtyPer: p.qtyPer, notes: p.notes ?? '', department: null })),
+  ];
+  await saveLines(db, actor, quoteId, input);
+  const n = (k: number, one: string, many = `${one}s`) => `${k} ${k === 1 ? one : many}`;
+  const said = mode === 'match'
+    ? `Parts brought up to ${list.fileName}: ${[n(comparison.added.length, 'part added', 'parts added'), n(comparison.removed.length, 'no longer listed and removed', 'no longer listed and removed'), n(comparison.changed.length, 'part changed', 'parts changed')].join(', ')}.`
+    : `${n(comparison.added.length, 'new part')} added from ${list.fileName}; the parts already on the quote were kept as they are.`;
+  await db.transaction(async (tx) => {
+    await tx.query("INSERT INTO quote.message (quote_id, author_id, kind, body) VALUES ($1, $2, 'event', $3)", [quoteId, actor.id, said]);
+    await audit(tx, actor.id, 'quote.parts_from_file', 'quote', quoteId, { attachmentId, fileName: list.fileName, mode, added: comparison.added.length, removed: mode === 'match' ? comparison.removed.map((l) => l.id) : [], changed: mode === 'match' ? comparison.changed.map((c) => ({ id: c.line.id, what: c.what })) : [] });
+  });
+  return comparison;
 }
 
 export async function attachmentFile(db: Queryable, id: number): Promise<{ fileName: string; contentType: string; sha256: string; quoteId: number }> {
