@@ -155,7 +155,7 @@ function BoardScroller({ children }: { children: ReactNode }) {
   );
 }
 
-const FOCUS_LABEL: Record<string, string> = { attention: 'Needs attention', estimating: 'With departments', sent: 'With customers', late: 'Overdue', won: 'Won in the last 45 days' };
+const FOCUS_LABEL: Record<string, string> = { attention: 'Needs attention', estimating: 'With departments', sent: 'With customers', pipeline: 'Pipeline: with customers', late: 'Overdue', won: 'Won in the last 45 days' };
 const needsAttention = (c: BoardCard) => c.stage === 'ready' || c.questionsFrom.length > 0;
 const overdue = (c: BoardCard) => ['draft', 'estimating', 'ready'].includes(c.stage) && !!c.customerDueOn && daysUntil(c.customerDueOn) < 0;
 
@@ -185,6 +185,8 @@ export function Board() {
     attention: cards.filter(needsAttention).length,
     estimating: cards.filter((c) => c.stage === 'estimating').length,
     sent: cards.filter((c) => c.stage === 'sent').length,
+    // What the customers have in hand: each sent quote at its first quantity, as its card shows it.
+    pipeline: cards.filter((c) => c.stage === 'sent').reduce((s, c) => s + (c.firstTotal ?? 0), 0),
     late: cards.filter(overdue).length,
     wonValue: cards.filter((c) => c.stage === 'won').reduce((s, c) => s + (c.awardAmount ?? 0), 0),
   };
@@ -192,7 +194,8 @@ export function Board() {
     focus === null ? true
       : focus === 'attention' ? needsAttention(c)
         : focus === 'late' ? overdue(c)
-          : c.stage === focus;
+          : focus === 'pipeline' ? c.stage === 'sent'
+            : c.stage === focus;
   const order = (a: BoardCard, b: BoardCard) => {
     const att = (c: BoardCard) => (c.questionsFrom.length > 0 ? 0 : 1);
     return att(a) - att(b) || (a.customerDueOn ?? '9999').localeCompare(b.customerDueOn ?? '9999') || b.updatedAt.localeCompare(a.updatedAt);
@@ -283,6 +286,7 @@ export function Board() {
         {metric('attention', tally.attention, mine ? 'Needs your attention' : 'Needs attention', 'Ready to send, or a department has asked a question', tally.attention > 0 ? 'attention' : undefined)}
         {metric('estimating', tally.estimating, 'With departments', 'Out with the departments for prices')}
         {metric('sent', tally.sent, 'With customers', 'Sent, waiting on the customer’s decision')}
+        {metric('pipeline', usdShort(tally.pipeline), 'Pipeline', 'The quotes the customers have now, sent and not yet won or lost, each at its first quantity')}
         {metric('late', tally.late, 'Overdue', 'Not sent yet, and past the date the customer wanted the quote', tally.late > 0 ? 'late' : undefined)}
         {metric('won', usdShort(tally.wonValue), 'Won · last 45 days', 'Award amounts of the quotes won in the last 45 days', tally.wonValue > 0 ? 'won' : undefined)}
       </div>

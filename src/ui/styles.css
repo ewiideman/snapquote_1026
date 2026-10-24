@@ -431,7 +431,7 @@ input.num { text-align: right; }
 /* ---------------------------------------------------------------- the Quotes page */
 /* the summary: one row of figures, each a filter. A figure is colored only when it calls for
    something: amber for what needs attention, red for overdue, green for money won. Zeros recede. */
-.metrics { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 1px; margin-bottom: var(--space-4); background: var(--line); border: 1px solid var(--card-line); border-radius: var(--r-xl); overflow: hidden; box-shadow: var(--shadow-card); }
+.metrics { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 1px; margin-bottom: var(--space-4); background: var(--line); border: 1px solid var(--card-line); border-radius: var(--r-xl); overflow: hidden; box-shadow: var(--shadow-card); }
 .metric { position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-width: 0; padding: 12px 16px 13px; border: 0; background: var(--surface); color: var(--ink); text-align: left; cursor: pointer; }
 .metric:hover { background: var(--sunken); }
 .metric:focus-visible { outline-offset: -3px; }
@@ -462,7 +462,7 @@ input.num { text-align: right; }
 
 /* the board: five stages; it scrolls sideways inside itself, never the page */
 .board-wrap { position: relative; }
-.board { display: grid; grid-template-columns: repeat(5, minmax(224px, 1fr)); gap: 10px; align-items: start; overflow-x: auto; overscroll-behavior-x: contain; scroll-snap-type: x proximity; scroll-padding: 0 2px; padding-bottom: 6px; border-radius: var(--r-xl); }
+.board { display: grid; grid-template-columns: repeat(5, minmax(176px, 1fr)); gap: 10px; align-items: start; overflow-x: auto; overscroll-behavior-x: contain; scroll-snap-type: x proximity; scroll-padding: 0 2px; padding-bottom: 6px; border-radius: var(--r-xl); }
 .board:focus-visible { outline-offset: 3px; }
 .board-wrap::before, .board-wrap::after { content: ""; position: absolute; top: 0; bottom: 6px; width: 36px; pointer-events: none; opacity: 0; transition: opacity 0.15s; z-index: 1; }
 .board-wrap::before { left: 0; background: linear-gradient(to right, var(--bg), transparent); }
@@ -476,8 +476,8 @@ input.num { text-align: right; }
 
 /* A lane is a tray with no outline; its stage has a small colored marker, never a filled lane. */
 .column { min-width: 0; background: var(--lane); border-radius: var(--r-xl); padding: 8px; scroll-snap-align: start; }
-.column-head { display: flex; align-items: center; gap: var(--space-2); padding: 4px 6px 10px; }
-.column-head h2 { font-size: var(--text-sm); font-weight: 600; color: var(--ink); letter-spacing: 0; }
+.column-head { display: flex; align-items: center; gap: var(--space-2); min-height: 44px; padding: 0 6px 6px; }
+.column-head h2 { min-width: 0; font-size: var(--text-sm); font-weight: 600; line-height: 1.25; color: var(--ink); letter-spacing: 0; }
 .stage-mark { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--stage-draft); }
 .stage-mark.estimating { background: var(--stage-estimating); }
 .stage-mark.ready { background: var(--stage-ready); }
@@ -504,6 +504,7 @@ input.num { text-align: right; }
 .qcard .title.untitled { color: var(--muted); }
 .qcard .meta { display: flex; justify-content: space-between; gap: var(--space-2); font-size: var(--text-xs); color: var(--muted); }
 .qcard .meta .who-num { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qcard .meta > span:last-child:not(.who-num) { flex: none; white-space: nowrap; }
 .qcard .meta .mono { font-size: 11.5px; }
 .qcard .status { display: flex; flex-direction: column; gap: 5px; margin-top: 2px; padding-top: 9px; border-top: 1px solid var(--line); }
 .depts { list-style: none; margin: 0 0 2px; padding: 0; display: flex; flex-direction: column; gap: 3px; font-size: var(--text-xs); }
@@ -704,7 +705,6 @@ table.grid .sub { font-size: 12px; color: var(--muted); }
   .strip-actions { width: 100%; justify-content: space-between; }
   .strip-help { padding-left: 16px; }
   .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .metric:last-child { grid-column: 1 / -1; }
   .toolbar .search { order: 2; flex-basis: 100%; max-width: none; }
   .toolbar .filter-chip { order: 3; }
   .board { grid-template-columns: minmax(0, 1fr); overflow: visible; scroll-snap-type: none; }

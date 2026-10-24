@@ -95,10 +95,11 @@ sign-in pages).
   inside it. `DropZone` stays for the quote page.
 - **`.metrics`**: one row of figures, each a toggle that filters the board: a filter icon shows under
   the pointer and on keyboard focus, and the one that is on is blue with a bar beneath it. Figures show
-  "–" while the board loads, not 0.
+  "–" while the board loads, not 0. Pipeline (Oct 24) is the quotes the customers have now (sent, not
+  won or lost), each at its first quantity as its card shows it; it filters to those quotes.
 - **`.toolbar`**: scope, search, the active filter (with a clear button), count and secondary links.
 - **Board**: `.board` scrolls sideways inside itself with edge fades and arrow buttons when the window
-  is too narrow; lanes stack on a phone. `.column` (a lane), `.column-head` with a `.stage-mark` (a
+  is too narrow (a lane is at least 176px, so all five fit from 1200px, where the full sidebar shows); lanes stack on a phone. Lane headings take one height, so every lane's cards start level. `.column` (a lane), `.column-head` with a `.stage-mark` (a
   small dot in the stage's color) and a `.badge` count (quiet at zero), `.column-empty`: words and a
   small icon, no box. Loading and a failed load are said the same quiet way in each lane.
 - **`.qcard`**: customer (or "Customer not set") to two lines, title to two lines, number · owner and

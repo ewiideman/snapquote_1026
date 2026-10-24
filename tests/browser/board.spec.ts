@@ -85,6 +85,12 @@ test('each card says what the quote needs next; the summary, search and scope fi
   await expect(card(page, 'Drill handle')).toHaveCount(0);
   await page.getByRole('button', { name: 'Show every quote' }).click();
   await expect(card(page, 'Drill handle')).toBeVisible();
+  // The pipeline: the quotes the customers have, as a figure, and as a filter.
+  await page.getByRole('button', { name: /Pipeline/ }).click();
+  await expect(page.locator('.filter-chip')).toContainText('Pipeline: with customers');
+  await expect(card(page, 'Detector mount')).toBeVisible();
+  await expect(card(page, 'Drill handle')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Show every quote' }).click();
 
   await page.getByLabel('Search quotes').fill('orion');
   await expect(page.locator('.qcard')).toHaveCount(2);
